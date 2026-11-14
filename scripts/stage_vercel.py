@@ -17,14 +17,14 @@ def main():
         sys.exit("Build or restore the Sri Lanka dataset before staging the deployment.")
 
     STAGE.mkdir(exist_ok=True)
-    for name in ("api.py", "analytics.py", "fire.py"):
+    for name in ("main.py", "analytics.py", "fire.py"):
         shutil.copyfile(ROOT / name, STAGE / name)
 
     requirements = (ROOT / "requirements.txt").read_text().splitlines()
     runtime = [line for line in requirements if line.split("==")[0] in RUNTIME]
     (STAGE / "requirements.txt").write_text("\n".join(runtime) + "\n")
     (STAGE / ".python-version").write_text("3.13\n")
-    (STAGE / "pyproject.toml").write_text('[tool.vercel]\nentrypoint = "api:app"\n')
+    (STAGE / "pyproject.toml").write_text('[tool.vercel]\nentrypoint = "main:app"\n')
     (STAGE / "package.json").write_text(json.dumps({"private": True, "engines": {"node": "22.x"}}))
 
     frontend = STAGE / "frontend"
@@ -45,7 +45,7 @@ def main():
         "framework": "fastapi",
         "buildCommand": "npm --prefix frontend ci --include=dev && npm --prefix frontend run build -- --outDir ../public && python -m zipfile -e processed-data.zip .",
         "functions": {
-            "api.py": {
+            "main.py": {
                 "includeFiles": "data/**",
                 "excludeFiles": "{frontend/**,public/**,processed-data.zip}",
             },
