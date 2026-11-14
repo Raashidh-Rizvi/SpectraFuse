@@ -10,8 +10,8 @@ try {
         npm ci
         if ($LASTEXITCODE) { throw 'Could not install frontend dependencies.' }
         npm run build
-        if ($LASTEXITCODE) { throw 'Could not build FireScope.' }
+        if ($LASTEXITCODE) { throw 'Could not build SpectraFuse.' }
     } finally { Pop-Location }
     & .\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port $Port
-    if ($LASTEXITCODE) { throw 'FireScope API exited with an error.' }
+    if ($LASTEXITCODE) { throw 'SpectraFuse API exited with an error.' }
 } finally { Pop-Location }

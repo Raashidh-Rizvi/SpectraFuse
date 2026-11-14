@@ -1,6 +1,6 @@
-# FireScope · NASA Space Apps
+# SpectraFuse · NASA Space Apps
 
-FireScope compares historical NASA FIRMS hotspot activity across MODIS and VIIRS. Its monthly calendar preserves observed VIIRS S-NPP where available and uses calibrated MODIS for earlier months. The dashboard shows provenance and an empirical holdout error range for estimates.
+SpectraFuse compares historical NASA FIRMS hotspot activity across MODIS and VIIRS. Its monthly calendar preserves observed VIIRS S-NPP where available and uses calibrated MODIS for earlier months. The dashboard shows provenance and an empirical holdout error range for estimates.
 
 ## Demo sequence
 

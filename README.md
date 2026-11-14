@@ -1,6 +1,6 @@
-# FireScope
+# SpectraFuse
 
-FireScope builds a monthly active-fire calendar from NASA FIRMS MODIS Standard Processing and VIIRS Suomi-NPP Standard Processing. It preserves raw CSV, validates daily observations, writes Parquet, and estimates earlier MODIS activity on a VIIRS detection-count scale.
+SpectraFuse builds a monthly active-fire calendar from NASA FIRMS MODIS Standard Processing and VIIRS Suomi-NPP Standard Processing. It preserves raw CSV, validates daily observations, writes Parquet, and estimates earlier MODIS activity on a VIIRS detection-count scale.
 
 ## Run on Windows
 
@@ -101,7 +101,7 @@ The dashboard sees newly completed NOAA-20 partitions on refresh. Re-run the com
 
 ## Themes, regions, and deployment
 
-Use the sun or moon button to switch themes. FireScope initially follows the operating-system theme and remembers an explicit choice in the browser. The Region menu lists downloaded datasets. A geographic selection covers the extent shown by its dataset. Estimated months have MODIS provenance and an empirical error range derived from the monthly holdout.
+Use the sun or moon button to switch themes. SpectraFuse initially follows the operating-system theme and remembers an explicit choice in the browser. The Region menu lists downloaded datasets. A geographic selection covers the extent shown by its dataset. Estimated months have MODIS provenance and an empirical error range derived from the monthly holdout.
 
 Run the original Sri Lanka NOAA-20 holdout comparison with:
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from backend.analytics import evaluate_overlap, historical_anomalies
 from backend.fire import ROOT, PRODUCTS, SOURCES, area_value, data_directory, monthly, workspace
 
-app = FastAPI(title="FireScope API")
+app = FastAPI(title="SpectraFuse API")
 PILOT = "79.5,5.8,82,10"
 
 

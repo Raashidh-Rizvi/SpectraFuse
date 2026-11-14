@@ -123,7 +123,7 @@ function App() {
   const chart = visible.map(row => ({...row, activity:row[measure]}));
   const errorMetric = metrics.find(row => row.Method === 'Calibrated MODIS');
   return <main>
-    <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>FireScope</strong><small>Satellite fire activity</small></div></div>
+    <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
       <div className="header-actions"><button className="button theme-button" type="button"
         aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
         onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
@@ -161,9 +161,10 @@ function App() {
             const key=value+'-'+String(index+1).padStart(2,'0');
             const item=visible.find(row=>row.month===key);
             const n=percent?item?.[anomalyKey]:item?.[measure];
-            const color=n==null?'#17204455':n<0?'#3d99c7':'#615cf5';
+            const intensity=n==null?0:Math.min(1,Math.abs(n)/maximum);
+            const color=n==null?'#17204455':`hsl(0 ${n<0?35:78}% ${43-19*intensity}%)`;
             return <td key={month}><button disabled={!item} type="button" aria-pressed={selected===key} title={item?.origin ?? 'Unavailable'} aria-label={month+' '+value+': '+format(n)+(percent&&n!=null?' percent':'')}
-              style={{backgroundColor:color,opacity:n == null ? .67 : Math.max(.48,Math.min(1,.48+Math.abs(n)/maximum))}}
+              style={{backgroundColor:color}}
               onClick={()=>setSelected(key)}>{format(n)}{percent&&n!=null?'%':''}</button></td>;
           })}</tr>)}
         </tbody></table></div>

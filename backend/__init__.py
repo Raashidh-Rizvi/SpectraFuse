@@ -1,1 +1,1 @@
-"""FireScope FastAPI backend."""
+"""SpectraFuse FastAPI backend."""

@@ -5,8 +5,8 @@ import streamlit as st
 from backend.analytics import evaluate_overlap, historical_anomalies
 from backend.fire import ROOT, SOURCES, monthly, workspace
 
-st.set_page_config(page_title="FireScope", page_icon="🛰️", layout="wide")
-st.title("FireScope")
+st.set_page_config(page_title="SpectraFuse", page_icon="🛰️", layout="wide")
+st.title("SpectraFuse")
 st.caption("MODIS and VIIRS · Monthly active-fire detections · UTC")
 areas = sorted(path.read_text(encoding="utf-8") for path in (ROOT / "data").glob("*/area.txt"))
 if not areas:
