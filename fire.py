@@ -1,10 +1,12 @@
 import argparse
 import calendar
+import csv
 import hashlib
 import os
 import tempfile
+import time
 from datetime import date, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from urllib.parse import quote
 
@@ -71,6 +73,9 @@ def normalize(payload, source, day, area):
              & data.satellite.str.strip().ne("") & data.daynight.isin(["D", "N"]))
     if not valid.fillna(False).all():
         raise ValueError(f"{source} {day}: {int((~valid.fillna(False)).sum())} invalid rows.")
+    for column in ("version", "scan", "track", "brightness", "bright_ti4", "bright_ti5", "bright_t31", "type"):
+        if column in frame:
+            data[column] = frame[column] if column in ("version", "type") else pd.to_numeric(frame[column], errors="coerce")
     data["confidence_class"] = confidence.astype("string")
     data["acquired_utc"] = stamp
     data["source"] = source
@@ -96,16 +101,22 @@ def partition(area, source, day, payload=None):
 
 
 def get(session, path):
-    try:
-        with session.get(API + path, timeout=(10, 90), allow_redirects=False) as response:
-            if response.status_code != 200:
-                raise ValueError(f"FIRMS returned HTTP {response.status_code}.")
-            return response.content
-    except requests.RequestException:
-        raise ValueError("FIRMS connection failed after retries.") from None
+    for attempt in range(3):
+        try:
+            with session.get(API + path, timeout=(10, 90), allow_redirects=False) as response:
+                if response.status_code == 200:
+                    return response.content
+                limited = response.status_code in (400, 403) and b"exceeding allowed transaction limit" in response.content.lower()
+                if not limited or attempt == 2:
+                    raise ValueError("FIRMS transaction limit exceeded." if limited
+                                     else f"FIRMS returned HTTP {response.status_code}.")
+        except requests.RequestException:
+            raise ValueError("FIRMS connection failed after retries.") from None
+        print("FIRMS transaction limit reached. Waiting 60 seconds before resuming.", flush=True)
+        time.sleep(60)
 
 
-def sync(area, start, end):
+def sync(area, start, end, sources=SOURCES):
     load_dotenv(ROOT / ".env")
     key = os.getenv("FIRMS_MAP_KEY", "").strip()
     if not key:
@@ -115,10 +126,11 @@ def sync(area, start, end):
             total=4, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])))
         key = quote(key, safe="")
         try:
-            availability = pd.read_csv(BytesIO(get(session, f"/data_availability/csv/{key}/ALL")))
+            availability = pd.concat([pd.read_csv(BytesIO(get(session, f"/data_availability/csv/{key}/{source}")))
+                                      for source in sources]).drop_duplicates()
             coverage = availability.set_index("data_id")
             windows = [(source, date.fromisoformat(coverage.loc[source, "min_date"]),
-                        date.fromisoformat(coverage.loc[source, "max_date"])) for source in SOURCES]
+                        date.fromisoformat(coverage.loc[source, "max_date"])) for source in sources]
         except (KeyError, TypeError, pd.errors.ParserError) as error:
             raise ValueError("Unexpected FIRMS availability response. Check your MAP_KEY.") from None
         for source, first, last in windows:
@@ -127,13 +139,40 @@ def sync(area, start, end):
             print(f"{source}: available {first} through {last}", flush=True)
             while day <= stop:
                 root = workspace(area)
-                raw = root / "raw" / source / f"{day}.csv"
-                output = root / "processed" / source / f"{day}.parquet"
-                if not output.exists():
-                    print(f"{source} {day}", flush=True)
-                    payload = None if raw.exists() else get(session, f"/area/csv/{key}/{source}/{area}/1/{day}")
-                    partition(area, source, day, payload)
-                day += timedelta(days=1)
+                pending = []
+                for _ in range(min(5, (stop - day).days + 1)):
+                    raw = root / "raw" / source / f"{day}.csv"
+                    output = root / "processed" / source / f"{day}.parquet"
+                    if not output.exists():
+                        if raw.exists():
+                            partition(area, source, day)
+                        else:
+                            pending.append(day)
+                    day += timedelta(days=1)
+                if not pending:
+                    continue
+                first, last = pending[0], pending[-1]
+                span = (last - first).days + 1
+                print(f"{source} {first} through {last}", flush=True)
+                payload = get(session, f"/area/csv/{key}/{source}/{area}/{span}/{first}")
+                reader = csv.reader(StringIO(payload.decode("utf-8-sig")), strict=True)
+                header = next(reader, [])
+                if set(COLUMNS) - set(header):
+                    raise ValueError("FIRMS response is missing expected CSV columns.")
+                date_column = header.index("acq_date")
+                daily = {str(first + timedelta(days=i)): [] for i in range(span)}
+                for row in reader:
+                    if not row:
+                        continue
+                    if len(row) != len(header) or row[date_column] not in daily:
+                        raise ValueError("FIRMS returned an invalid row or out-of-window date.")
+                    daily[row[date_column]].append(row)
+                for requested in pending:
+                    buffer = StringIO()
+                    writer = csv.writer(buffer)
+                    writer.writerow(header)
+                    writer.writerows(daily[str(requested)])
+                    partition(area, source, requested, buffer.getvalue().encode())
 
 
 def monthly(area, bounds=None):
@@ -208,13 +247,14 @@ def main():
         if name == "sync":
             command.add_argument("--start", required=True, type=date.fromisoformat)
             command.add_argument("--end", required=True, type=date.fromisoformat)
+            command.add_argument("--source", choices=SOURCES, action="append")
     args = parser.parse_args()
     try:
         area = "demo" if args.command == "demo" or args.area == "demo" and args.command == "build" else area_value(args.area)
         if args.command == "sync":
             if args.start > args.end:
                 raise ValueError("Start must be on or before end.")
-            sync(area, args.start, args.end)
+            sync(area, args.start, args.end, args.source or SOURCES)
         if args.command == "demo":
             demo()
         table, metrics = monthly(area)

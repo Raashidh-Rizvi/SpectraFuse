@@ -81,3 +81,37 @@ def test_sync_clips_to_availability_and_resumes(monkeypatch):
     assert calls == ["/area/csv/mock-key/MODIS_SP/world/1/2020-01-01",
                      "/area/csv/mock-key/VIIRS_SNPP_SP/world/1/2020-01-02"]
     assert len(list(fire.workspace("world").rglob("*.parquet"))) == 2
+
+def test_history_uses_prior_months_and_handles_zero_baseline():
+    from analytics import historical_anomalies
+    sample = pd.Series([0., 0., 10., 15.],
+                       index=['2018-01', '2019-01', '2020-01', '2021-01'])
+    result = historical_anomalies(sample)
+    assert pd.isna(result.loc['2019-01', 'Historical median'])
+    assert result.loc['2020-01', 'Departure (detections)'] == 10
+    assert pd.isna(result.loc['2020-01', 'Departure (%)'])
+
+
+def test_grid_retains_unmatched_cells():
+    from grid import daily_grid
+    fire.partition('world', fire.SOURCES[0], DAY, (HEADER + ROW).encode())
+    viirs = ROW.replace(',Terra,85,', ',N,h,')
+    extra = viirs.replace('7,80,', '8,81,')
+    fire.partition('world', fire.SOURCES[1], DAY, (HEADER + viirs + extra).encode())
+    cells = daily_grid('world', str(DAY), str(DAY))
+    assert list(cells[fire.SOURCES[0]]) == [1, 0]
+    assert list(cells[fire.SOURCES[1]]) == [1, 1]
+
+def test_sync_splits_batched_csv_and_preserves_empty_day(monkeypatch):
+    monkeypatch.setenv("FIRMS_MAP_KEY", "mock-key")
+
+    def reply(session, path):
+        if "/data_availability/" in path:
+            return b"data_id,min_date,max_date\nMODIS_SP,2020-01-01,2020-01-03\n"
+        assert path.endswith("/world/3/2020-01-01")
+        return (HEADER + ROW + ROW.replace("2020-01-01", "2020-01-03")).encode()
+
+    monkeypatch.setattr(fire, "get", reply)
+    fire.sync("world", DAY, date(2020, 1, 3), (fire.SOURCES[0],))
+    parts = sorted(fire.workspace("world").rglob("*.parquet"))
+    assert [len(pd.read_parquet(path)) for path in parts] == [1, 0, 1]

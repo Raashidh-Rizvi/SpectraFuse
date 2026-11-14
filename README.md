@@ -39,5 +39,40 @@ The pipeline validates coordinates, acquisition date and time, confidence, day/n
 
 The model fits a single regional multiplier using the ratio of total VIIRS to total MODIS detections over the earlier paired months. It reserves the latest quarter of paired months, with at least one, to compare unscaled and scaled mean absolute error. Three training months and positive totals are required. The calendar uses observed VIIRS where available and scaled MODIS wherever MODIS has a complete total and VIIRS is unavailable. Blank cells indicate missing values. The dashboard can recalculate for a smaller extent, show monthly trends and seasonal departures, and export the selected period.
 
-This regional baseline assumes a stable detection ratio through time. Sensor resolution, overpass frequency, cloud cover, and other differences can change that ratio. Detection counts describe observed hotspot activity. They do not measure burned area or unique wildfire events. Seasonal departures are descriptive and calculated from all loaded years with at least two values for the same calendar month.
+This regional baseline assumes a stable detection ratio through time. Sensor resolution, overpass frequency, cloud cover, and other differences can change that ratio. Detection counts describe observed hotspot activity. They do not measure burned area or unique wildfire events. Seasonal departures are descriptive and calculated from the median of at least two earlier values for the same calendar month.
 
+
+## Sri Lanka pilot
+
+Use the 2018–2023 sync command above, then open notebooks/sri-lanka-pilot.ipynb in a Jupyter-compatible editor with the project Python environment. The notebook compares raw monthly counts, later holdout errors, approximately 5 km shared grid cells, and anomalies against earlier same-month medians.
+
+Shared grid-day matches represent co-occurrence over a UTC day. The grid has fixed angular spacing, so east–west width varies with latitude. A match can span distinct detections or overpasses. The notebook includes grid-days with at least one detection, and zero in either product means zero records in its downloaded daily partition. Satellite coverage is not observable from the hotspot CSV alone.
+
+API requests fetch up to five consecutive dates at a time. The response is split into daily CSV files before checkpointing. The monthly error percentile describes past observed errors in the holdout and has no guaranteed interval coverage.
+
+## Local API
+
+Run the API in a second PowerShell window from the project folder:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8000
+```
+
+Interactive API documentation is available at http://127.0.0.1:8000/docs. The seven fire endpoints use the existing Parquet store. Use region=sri-lanka for the pilot and region=demo for synthetic data. Hotspots accept a UTC day and product code. Area analysis accepts a bounding box within the downloaded extent.
+
+
+After both products finish, generate the pilot CSVs and interactive chart:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/pilot_report.py
+```
+
+Use the reported output folder to find the monthly comparison chart, holdout metrics, and spatial validation. The spatial summary applies the region-wide multiplier to occupied grid-days as a diagnostic. The model is fitted on regional monthly totals.
+
+To resume the full pilot with automatic pauses when FIRMS applies its transaction limit:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/sri-lanka-pilot.ps1
+```
+
+To export an interim report while downloading, add --partial to the pilot report command. The report is saved separately under pilot-partial.

@@ -2,6 +2,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from analytics import evaluate_overlap, historical_anomalies
 from fire import ROOT, SOURCES, monthly, workspace
 
 st.set_page_config(page_title="FireScope", page_icon="🛰️", layout="wide")
@@ -13,6 +14,8 @@ if not areas:
     st.stop()
 
 area = st.sidebar.selectbox("Dataset", areas, format_func=lambda name: "Synthetic demo" if name == "demo" else name)
+if area != "demo":
+    st.caption(f"Downloaded extent {area}")
 if area == "demo":
     st.warning("Synthetic demo. Values are generated for testing.")
 bounds = None
@@ -33,20 +36,25 @@ years = sorted({int(month[:4]) for month in table.index})
 selection = st.sidebar.select_slider("Calendar years", options=years,
                                      value=(years[0], years[-1])) if len(years) > 1 else (years[0], years[0])
 calendar_data = table.assign(year=table.index.str[:4].astype(int), month_of_year=table.index.str[5:].astype(int))
-observations = calendar_data[series]
-baseline = observations.groupby(calendar_data.month_of_year).transform("mean")
-samples = observations.groupby(calendar_data.month_of_year).transform("count")
-calendar_data["Departure from seasonal mean"] = (observations - baseline).where(samples >= 2)
-anomaly = st.sidebar.checkbox("Show departures from seasonal mean")
+calendar_data = calendar_data.join(historical_anomalies(calendar_data[series]))
+measure = st.sidebar.selectbox("Calendar view", [series, "Departure (%)", "Departure (detections)"])
+anomaly = measure != series
 visible = calendar_data[calendar_data.year.between(*selection)]
-measure = "Departure from seasonal mean" if anomaly else series
+valid_activity = visible[series].dropna()
+if len(valid_activity):
+    seasonal = valid_activity.groupby(valid_activity.index.str[5:]).median()
+    peak = pd.Timestamp(f"2000-{seasonal.idxmax()}-01").strftime("%B")
+    cols = st.columns(3)
+    cols[0].metric("Months with data", len(valid_activity))
+    cols[1].metric("Peak seasonal month", peak)
+    cols[2].metric("Highest activity month", valid_activity.idxmax())
 grid = visible.pivot(index="year", columns="month_of_year", values=measure).reindex(columns=range(1, 13))
 grid.columns = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
-st.plotly_chart(px.imshow(grid, y=grid.index.astype(str), aspect="auto",
+calendar_selection = st.plotly_chart(px.imshow(grid, y=grid.index.astype(str), aspect="auto",
                          color_continuous_scale="RdBu_r" if anomaly else "YlOrRd",
                          color_continuous_midpoint=0 if anomaly else None,
-                         labels={"color": "Detections", "x": "Month", "y": "Year"}))
-st.caption("Blank cells indicate unavailable values. Seasonal departures use all loaded years and require two values for the same calendar month.")
+                         labels={"color": ("%" if measure == "Departure (%)" else "Detections"), "x": "Month", "y": "Year"}), on_select="rerun", selection_mode="points")
+st.caption("Blank cells indicate unavailable values. Seasonal departures use the median of at least two earlier values for the same calendar month. When the median is zero, use the departure in detections.")
 trend = visible[[*SOURCES, "harmonized"]].rename(columns={
     "MODIS_SP": "MODIS", "VIIRS_SNPP_SP": "VIIRS S-NPP", "harmonized": "VIIRS-scale detections"})
 st.plotly_chart(px.line(trend, markers=True, labels={"value": "Detections", "variable": "Series"}))
@@ -59,23 +67,41 @@ if "factor" in metrics:
     st.caption(f"{metrics['training_months']} training months and {metrics['holdout_months']} later holdout months. MAE is measured in monthly detections.")
 else:
     st.info("Calibration requires at least three training months with positive totals for both sensors and a later holdout month.")
+comparison, validation = evaluate_overlap(table)
+if not comparison.empty:
+    with st.expander("Held-out sensor comparison"):
+        st.plotly_chart(px.line(comparison, markers=True, labels={"value": "Monthly detections"}))
+        st.dataframe(validation)
+        st.caption("The 90th percentile describes historical absolute errors in the holdout period. It is an empirical error summary.")
 with st.expander("Monthly counts and provenance"):
-    st.dataframe(visible[[*SOURCES, "harmonized", "origin", "Departure from seasonal mean"]])
+    st.dataframe(visible[[*SOURCES, "harmonized", "origin", "Historical median", "Departure (%)", "Departure (detections)"]])
 st.download_button("Download selected months as CSV", visible.to_csv().encode(), "firescope-monthly.csv", "text/csv")
 st.caption("Satellite detections can include repeat observations and non-fire thermal sources. Counts measure detection activity, and coverage can vary by sensor.")
 
 
 with st.expander("Monthly detection map"):
-    map_month = st.selectbox("Map month", visible.index, index=len(visible) - 1)
+    selected_month = visible.index[-1]
+    if calendar_selection.selection.points:
+        point = calendar_selection.selection.points[0]
+        labels = list(grid.columns)
+        candidate = f"{point.get('y')}-{labels.index(point['x']) + 1:02}" if point.get("x") in labels else ""
+        if candidate in visible.index:
+            selected_month = candidate
+    map_month = st.selectbox("Map month", visible.index, index=visible.index.get_loc(selected_month),
+                             key=f"map-month-{selected_month}")
+    st.dataframe(visible.loc[[map_month], [*SOURCES, "harmonized", "origin",
+                                           "Historical median", "Departure (%)"]])
     map_source = st.selectbox("Map sensor", SOURCES)
     parts = sorted((workspace(area) / "processed" / map_source).glob(f"{map_month}-*.parquet"))
     if parts:
-        points = pd.concat((pd.read_parquet(part, columns=["latitude", "longitude", "grid_lat", "grid_lon"])
+        points = pd.concat((pd.read_parquet(part)
                             for part in parts), ignore_index=True)
         if bounds is not None:
             west, south, east, north = bounds
             points = points[points.latitude.between(south, north) & points.longitude.between(west, east)]
         cells = points.groupby(["grid_lat", "grid_lon"]).size().rename("Detections").reset_index()
+        st.download_button("Download selected hotspots", points.to_csv(index=False),
+                           f"{map_source}-{map_month}.csv", "text/csv")
         if len(cells):
             cells["Latitude"] = cells.grid_lat + 0.5
             cells["Longitude"] = cells.grid_lon + 0.5
