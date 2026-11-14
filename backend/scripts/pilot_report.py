@@ -5,10 +5,10 @@ from pathlib import Path
 
 import plotly.express as px
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from analytics import evaluate_overlap, historical_anomalies
-from fire import SOURCES, atomic, monthly, workspace
-from grid import daily_grid, spatial_validation
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from backend.analytics import evaluate_overlap, historical_anomalies
+from backend.fire import SOURCES, atomic, monthly, workspace
+from backend.grid import daily_grid, spatial_validation
 
 AREA = "79.5,5.8,82,10"
 

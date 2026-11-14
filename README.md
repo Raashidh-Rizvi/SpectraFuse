@@ -7,10 +7,10 @@ FireScope builds a monthly active-fire calendar from NASA FIRMS MODIS Standard P
 From PowerShell in the project folder:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+powershell -ExecutionPolicy Bypass -File .\backend\scripts\setup.ps1
 .\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe fire.py demo
-powershell -ExecutionPolicy Bypass -File .\scripts\run.ps1
+.\.venv\Scripts\python.exe -m backend.fire demo
+powershell -ExecutionPolicy Bypass -File .\backend\scripts\run.ps1
 ```
 
 Open http://127.0.0.1:8501. Select **Synthetic demo** to explore without credentials.
@@ -20,7 +20,7 @@ Open http://127.0.0.1:8501. Select **Synthetic demo** to explore without credent
 Request a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/) and enter it as the value of FIRMS_MAP_KEY in the local .env file. Setup creates this file from .env.example if needed. Keep .env private. A process environment variable takes precedence.
 
 ```powershell
-.\.venv\Scripts\python.exe fire.py sync --area '79.5,5.8,82,10' --start 2018-01-01 --end 2023-12-31
+.\.venv\Scripts\python.exe -m backend.fire sync --area '79.5,5.8,82,10' --start 2018-01-01 --end 2023-12-31
 ```
 
 The example uses a Sri Lanka bounding box. Dates are inclusive UTC dates. Use west,south,east,north or world. Start with a single full month to check access and download size. The [FIRMS Area API](https://firms.modaps.eosdis.nasa.gov/api/area) uses a transaction quota, and worldwide VIIRS requests can return many detections per day. Sync intersects the requested dates with each product's reported [availability](https://firms.modaps.eosdis.nasa.gov/api/data_availability/).
@@ -28,7 +28,7 @@ The example uses a Sri Lanka bounding box. Dates are inclusive UTC dates. Use we
 Each extent has its own folder under data, with its extent in area.txt. The raw/ and processed/ directories retain per-sensor, per-day CSV and Parquet. Re-run the same sync command to resume. A validated raw file is reused if its Parquet is missing. Completely processed days are skipped, including header-only days. To rebuild just the monthly exports:
 
 ```powershell
-.\.venv\Scripts\python.exe fire.py build --area '79.5,5.8,82,10'
+.\.venv\Scripts\python.exe -m backend.fire build --area '79.5,5.8,82,10'
 ```
 
 Monthly exports live in harmonized/monthly.csv and harmonized/monthly.parquet. A month contributes a sensor total only when every calendar day has a processed partition. This measures request completeness. Coverage gaps within a successful NASA response can still affect detection counts. The downloader stops on an invalid response and retries transient HTTP failures with backoff.
@@ -64,7 +64,7 @@ Interactive API documentation is available at http://127.0.0.1:8000/docs. The se
 After both products finish, generate the pilot CSVs and interactive chart:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/pilot_report.py
+.\.venv\Scripts\python.exe backend/scripts/pilot_report.py
 ```
 
 Use the reported output folder to find the monthly comparison chart, holdout metrics, and spatial validation. The spatial summary applies the region-wide multiplier to occupied grid-days as a diagnostic. The model is fitted on regional monthly totals.
@@ -72,7 +72,7 @@ Use the reported output folder to find the monthly comparison chart, holdout met
 To resume the full pilot with automatic pauses when FIRMS applies its transaction limit:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/sri-lanka-pilot.ps1
+powershell -ExecutionPolicy Bypass -File backend/scripts/sri-lanka-pilot.ps1
 ```
 
 To export an interim report while downloading, add --partial to the pilot report command. The report is saved separately under pilot-partial.
@@ -82,9 +82,9 @@ To export an interim report while downloading, add --partial to the pilot report
 Install Python 3.13 and Node.js 22.12 or newer. From the project directory in PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
-powershell -ExecutionPolicy Bypass -File scripts/sri-lanka-pilot.ps1
-powershell -ExecutionPolicy Bypass -File scripts/run-web.ps1
+powershell -ExecutionPolicy Bypass -File backend/scripts/setup.ps1
+powershell -ExecutionPolicy Bypass -File backend/scripts/sri-lanka-pilot.ps1
+powershell -ExecutionPolicy Bypass -File backend/scripts/run-web.ps1
 ```
 
 Open http://127.0.0.1:8001 for the React dashboard and http://127.0.0.1:8001/docs for FastAPI. The launch script builds React and serves it with FastAPI on the same local address. The browser never needs the FIRMS key. The Leaflet basemap requires an internet connection.
@@ -94,7 +94,7 @@ Choose a year and sensor basis, then select a calendar cell to inspect the three
 Download additional NOAA-20 observations for the same extent:
 
 ```powershell
-.\.venv\Scripts\python.exe fire.py sync --source VIIRS_NOAA20_SP --area '79.5,5.8,82,10' --start 2018-04-01 --end 2023-12-31
+.\.venv\Scripts\python.exe -m backend.fire sync --source VIIRS_NOAA20_SP --area '79.5,5.8,82,10' --start 2018-04-01 --end 2023-12-31
 ```
 
 The dashboard sees newly completed NOAA-20 partitions on refresh. Re-run the command after the FIRMS quota replenishes to resume from completed days. For development, run the FastAPI server on port 8000 and run npm ci followed by npm run dev from the frontend folder.
@@ -106,7 +106,7 @@ Use the sun or moon button to switch themes. FireScope initially follows the ope
 Run the original Sri Lanka NOAA-20 holdout comparison with:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/noaa20_validation.py
+.\.venv\Scripts\python.exe backend/scripts/noaa20_validation.py
 ```
 
 Build a container and attach a populated local data directory:
@@ -120,18 +120,18 @@ For a hosted deployment, supply the same data directory as a persistent read-onl
 
 Run the repeatable browser checks from frontend with npx playwright install chromium, followed by npx playwright test. Start the React and FastAPI application first and point FIRESCOPE_TEST_URL at its address. The suite uses the real Sri Lanka pilot.
 
-To resume the complete Sri Lanka Standard Processing backfill, run scripts/history.ps1. The product availability API bounds each request to the available historical dates. The Central Thailand comparison uses the 101,14,102,15 bounding box for 2023. Polygon drawing filters the selected month's map and detection download.
+To resume the complete Sri Lanka Standard Processing backfill, run backend/scripts/history.ps1. The product availability API bounds each request to the available historical dates. The Central Thailand comparison uses the 101,14,102,15 bounding box for 2023. Polygon drawing filters the selected month's map and detection download.
 
 ## Record the demo
 
-With the web app running and the frontend dependencies installed, run node scripts/record-demo.mjs from the project root. The script uses Microsoft Edge and produces data/demo-recording/firescope-demo.webm. Set FIRESCOPE_TEST_URL to the local server address if it differs from http://127.0.0.1:8003.
+With the web app running and the frontend dependencies installed, run node backend/scripts/record-demo.mjs from the project root. The script uses Microsoft Edge and produces data/demo-recording/firescope-demo.webm. Set FIRESCOPE_TEST_URL to the local server address if it differs from http://127.0.0.1:8003.
 
 ## Deploy to Vercel
 
 From the repository root, run:
 
 ```powershell
-python scripts/stage_vercel.py
+python backend/scripts/stage_vercel.py
 npx vercel@latest deploy --cwd .vercel-stage --archive=tgz
 ```
 

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from fire import SOURCES
+from backend.fire import SOURCES
 
 
 def historical_anomalies(series):

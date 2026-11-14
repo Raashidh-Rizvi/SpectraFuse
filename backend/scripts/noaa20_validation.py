@@ -2,11 +2,11 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from analytics import evaluate_overlap
-from api import dashboard_frame
-from fire import SOURCES, workspace
+from backend.analytics import evaluate_overlap
+from backend.api import dashboard_frame
+from backend.fire import SOURCES, workspace
 
 frame = dashboard_frame("sri-lanka").loc["2018-01":"2023-12"]
 holdout, _ = evaluate_overlap(frame)

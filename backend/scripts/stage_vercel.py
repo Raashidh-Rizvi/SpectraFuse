@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 STAGE = ROOT / ".vercel-stage"
 RUNTIME = {"fastapi", "pandas", "pyarrow", "python-dotenv", "requests"}
 
@@ -18,7 +18,7 @@ def main():
 
     STAGE.mkdir(exist_ok=True)
     (STAGE / "backend").mkdir(exist_ok=True)
-    for name in ("backend/__init__.py", "backend/main.py", "analytics.py", "fire.py"):
+    for name in ("backend/__init__.py", "backend/main.py", "backend/analytics.py", "backend/fire.py"):
         shutil.copyfile(ROOT / name, STAGE / name)
 
     requirements = (ROOT / "requirements.txt").read_text().splitlines()

@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-Push-Location (Split-Path -Parent $PSScriptRoot)
+Push-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 try {
     if (!(Test-Path .\.venv\Scripts\python.exe)) {
         python -m venv .venv

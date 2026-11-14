@@ -3,7 +3,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-import fire
+from backend import fire
 
 DAY = date(2020, 1, 1)
 HEADER = ",".join(fire.COLUMNS) + "\n"
@@ -83,7 +83,7 @@ def test_sync_clips_to_availability_and_resumes(monkeypatch):
     assert len(list(fire.workspace("world").rglob("*.parquet"))) == 2
 
 def test_history_uses_prior_months_and_handles_zero_baseline():
-    from analytics import historical_anomalies
+    from backend.analytics import historical_anomalies
     sample = pd.Series([0., 0., 10., 15.],
                        index=['2018-01', '2019-01', '2020-01', '2021-01'])
     result = historical_anomalies(sample)
@@ -93,7 +93,7 @@ def test_history_uses_prior_months_and_handles_zero_baseline():
 
 
 def test_grid_retains_unmatched_cells():
-    from grid import daily_grid
+    from backend.grid import daily_grid
     fire.partition('world', fire.SOURCES[0], DAY, (HEADER + ROW).encode())
     viirs = ROW.replace(',Terra,85,', ',N,h,')
     extra = viirs.replace('7,80,', '8,81,')

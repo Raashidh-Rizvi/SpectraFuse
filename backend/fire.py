@@ -16,7 +16,7 @@ from dotenv import dotenv_values, load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def data_directory():

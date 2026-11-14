@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from fire import SOURCES, workspace
+from backend.fire import SOURCES, workspace
 
 
 def daily_grid(area, start, end):

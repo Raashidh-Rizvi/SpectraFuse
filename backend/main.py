@@ -7,8 +7,8 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from analytics import evaluate_overlap, historical_anomalies
-from fire import ROOT, PRODUCTS, SOURCES, area_value, data_directory, monthly, workspace
+from backend.analytics import evaluate_overlap, historical_anomalies
+from backend.fire import ROOT, PRODUCTS, SOURCES, area_value, data_directory, monthly, workspace
 
 app = FastAPI(title="FireScope API")
 PILOT = "79.5,5.8,82,10"

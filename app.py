@@ -2,8 +2,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from analytics import evaluate_overlap, historical_anomalies
-from fire import ROOT, SOURCES, monthly, workspace
+from backend.analytics import evaluate_overlap, historical_anomalies
+from backend.fire import ROOT, SOURCES, monthly, workspace
 
 st.set_page_config(page_title="FireScope", page_icon="🛰️", layout="wide")
 st.title("FireScope")
