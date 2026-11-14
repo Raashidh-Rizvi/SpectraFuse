@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Activity, CalendarDays, Download, Flame, Layers, MapPin, Moon, Orbit, Sun} from 'lucide-react';
-import {Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
+import {Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
@@ -9,8 +9,13 @@ import './style.css';
 const base = (import.meta.env.VITE_API_BASE_URL || '/api/fire').replace(/\/+$/, '');
 const modis = 'MODIS_SP', viirs = 'VIIRS_SNPP_SP', noaa = 'VIIRS_NOAA20_SP';
 const names = {[modis]:'MODIS', [viirs]:'VIIRS S-NPP', [noaa]:'VIIRS NOAA-20', harmonized:'VIIRS-scale'};
+const sensorColors = {
+  [modis]: {fill:'#e52e3e', stroke:'#7c1422'},
+  [viirs]: {fill:'#ff861f', stroke:'#87300b'},
+  [noaa]: {fill:'#de3476', stroke:'#791743'},
+};
 const months = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
-const format = n => n == null ? '—' : new Intl.NumberFormat('en', {maximumFractionDigits:1}).format(n);
+const format = n => n == null ? 'â€”' : new Intl.NumberFormat('en', {maximumFractionDigits:1}).format(n);
 
 async function get(path, signal) {
   const response = await fetch(base + path, {signal});
@@ -18,13 +23,13 @@ async function get(path, signal) {
   return response.json();
 }
 
-function DetectionMap({cells, loading, extent, vertices, drawing, onVertex}) {
+function DetectionMap({cells, loading, sensor, extent, vertices, drawing, onVertex}) {
   const element = useRef(null);
   const map = useRef(null);
   useEffect(() => {
     const view = L.map(element.current, {scrollWheelZoom:false}).setView([7.8,80.7],7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      attribution:'Â© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(view);
     map.current = view;
     const observer = new ResizeObserver(() => view.invalidateSize());
@@ -33,10 +38,10 @@ function DetectionMap({cells, loading, extent, vertices, drawing, onVertex}) {
   }, []);
   useEffect(() => {
     const group = L.layerGroup(cells.map(cell => L.circleMarker([cell.latitude,cell.longitude], {
-      color:'#d9faff', fillColor:'#5868f4', fillOpacity:.8, weight:1, radius:Math.min(23,4+Math.sqrt(cell.count))
-    }).bindTooltip(format(cell.count) + ' detections'))).addTo(map.current);
+      color:sensorColors[sensor].stroke, fillColor:sensorColors[sensor].fill, fillOpacity:.93, weight:1.5, radius:Math.min(23,4+Math.sqrt(cell.count))
+    }).bindTooltip(names[sensor] + ': ' + format(cell.count) + ' detections'))).addTo(map.current);
     return () => group.remove();
-  }, [cells]);
+  }, [cells,sensor]);
   useEffect(() => {
     const [w,s,e,n] = extent.split(",").map(Number);
     if (Number.isFinite(n)) map.current.fitBounds([[s,w],[n,e]]);
@@ -53,7 +58,7 @@ function DetectionMap({cells, loading, extent, vertices, drawing, onVertex}) {
     return () => shape.remove();
   }, [vertices]);
   return <div className="mapwrap"><div ref={element} className="map" aria-label="Map of recorded fire detections"/>
-    {loading && <span className="mapstatus">Loading detections…</span>}</div>;
+    {loading && <span className="mapstatus">Loading detectionsâ€¦</span>}</div>;
 }
 
 function App() {
@@ -82,7 +87,9 @@ function App() {
   const [polygon,setPolygon] = useState('');
   const polygonQuery = polygon ? '&polygon='+encodeURIComponent(polygon) : '';
   const [selected,setSelected] = useState(''), [sensor,setSensor] = useState(viirs);
-  const [map,setMap] = useState(null), [error,setError] = useState(''), [mapError,setMapError] = useState('');
+  const [mapResult,setMap] = useState(null), [error,setError] = useState(''), [mapError,setMapError] = useState('');
+  const mapPath = '/monthly-hotspots?month='+selected+'&source='+sensor+'&'+query+polygonQuery;
+  const map = mapResult?.path === mapPath ? mapResult.data : null;
   const [percent,setPercent] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -98,10 +105,12 @@ function App() {
     if (!selected) return;
     const controller = new AbortController();
     setMap(null); setMapError('');
-    get('/monthly-hotspots?month='+selected+'&source='+sensor+'&'+query+polygonQuery,controller.signal).then(setMap)
+    get(mapPath,controller.signal).then(data => {
+      if (!controller.signal.aborted) setMap({path:mapPath,data});
+    })
       .catch(err => {if (!controller.signal.aborted) setMapError(err.message);});
     return () => controller.abort();
-  }, [selected,sensor,query,polygonQuery]);
+  }, [selected,mapPath]);
   const years = [...new Set(rows.map(row => row.month.slice(0,4)))];
   const visible = rows.filter(row => year === 'all' || row.month.startsWith(year));
   const active = visible.filter(row => row[measure] != null);
@@ -120,17 +129,17 @@ function App() {
         onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
         {theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}
       </button><a className="button" href={base+'/download?'+query+(year==='all' ? '' : '&year='+year)}><Download size={16}/> Monthly CSV</a></div></header>
-    <section className="intro"><div><p className="location"><MapPin size={15}/> {regionInfo?.label ?? 'Sri Lanka'}</p><h1>Burning activity</h1><p>NASA FIRMS · Standard Processing · UTC</p></div>
+    <section className="intro"><div><p className="location"><MapPin size={15}/> {regionInfo?.label ?? 'Sri Lanka'}</p><h1>Burning activity</h1><p>NASA FIRMS Â· Standard Processing Â· UTC</p></div>
       <div className="filters"><label><span>Region</span><select value={region} onChange={e=>setRegion(e.target.value)}>
       {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
       <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
     </section>
     {error && <p role="alert" className="panel notice">{error}</p>}
-    {!error && !rows.length && <p role="status" className="panel notice">Loading NASA FIRMS observations…</p>}
+    {!error && !rows.length && <p role="status" className="panel notice">Loading NASA FIRMS observationsâ€¦</p>}
     {!!rows.length && <div className="dashboard">
-      <section className="panel stat"><span><Layers size={17}/> Months with data</span><strong>{active.length}</strong><small>{visible[0]?.month} — {visible.at(-1)?.month}</small></section>
-      <section className="panel stat"><span><Flame size={17}/> {names[measure]} detections</span><strong>{active.length ? format(total) : '—'}</strong><small>Sum across selected months</small></section>
-      <section className="panel stat dark"><span><Activity size={17}/> Peak activity</span><strong>{peak?.month ?? '—'}</strong><small>{format(peak?.[measure])} detections</small></section>
+      <section className="panel stat"><span><Layers size={17}/> Months with data</span><strong>{active.length}</strong><small>{visible[0]?.month} â€” {visible.at(-1)?.month}</small></section>
+      <section className="panel stat"><span><Flame size={17}/> {names[measure]} detections</span><strong>{active.length ? format(total) : 'â€”'}</strong><small>Sum across selected months</small></section>
+      <section className="panel stat dark"><span><Activity size={17}/> Peak activity</span><strong>{peak?.month ?? 'â€”'}</strong><small>{format(peak?.[measure])} detections</small></section>
       <section className="panel stat"><span><Orbit size={17}/> NOAA-20 coverage</span><strong>{noaaMonths}<em> / {rows.length}</em></strong><small>Complete months across the pilot</small></section>
       <section className="panel trend"><h2>Historical activity</h2><p>{names[measure]} monthly detections</p>
         <div className="chart"><ResponsiveContainer><AreaChart data={chart} margin={{left:1,right:13,top:10,bottom:0}}>
@@ -141,8 +150,10 @@ function App() {
         </AreaChart></ResponsiveContainer></div>
       </section>
       <section className="panel compare dark"><h2>Sensor comparison</h2><p>{selected || 'Select a month'}</p><div className="chart"><ResponsiveContainer><BarChart data={[modis,viirs,noaa].map(key=>({name:names[key],count:selectedRow?.[key]}))}>
-        <CartesianGrid vertical={false} stroke="#c5d1ff25"/><XAxis dataKey="name" tick={{fill:'var(--chart-label)',fontSize:10}}/><YAxis width={42} tick={{fill:'var(--chart-label)',fontSize:10}}/><Tooltip contentStyle={{background:'#242e59'}}/><Bar dataKey="count" name="Detections" fill="#a5b5ff" radius={[5,5,0,0]}/>
-        </BarChart></ResponsiveContainer></div>{selectedRow?.estimate_low != null && <p>Estimated from MODIS � empirical error range {format(selectedRow.estimate_low)}�{format(selectedRow.estimate_high)}</p>}
+        <CartesianGrid vertical={false} stroke="#c5d1ff25"/><XAxis dataKey="name" tick={{fill:'var(--chart-label)',fontSize:10}}/><YAxis width={42} tick={{fill:'var(--chart-label)',fontSize:10}}/><Tooltip contentStyle={{background:'#242e59'}}/><Bar dataKey="count" name="Detections" radius={[5,5,0,0]}>
+          {Object.entries(sensorColors).map(([key,{fill}])=><Cell key={key} fill={fill}/>)}
+        </Bar>
+        </BarChart></ResponsiveContainer></div>{selectedRow?.estimate_low != null && <p>Estimated from MODIS · empirical error range {format(selectedRow.estimate_low)}–{format(selectedRow.estimate_high)}</p>}
         <small>Held-out monthly MAE: {format(errorMetric?.MAE)} detections</small></section>
       <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
         <div className="calendar-scroll"><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
@@ -158,7 +169,7 @@ function App() {
         </tbody></table></div>
         <small>{percent?'Percent departure from the median of at least two prior values for the same month. A zero median leaves the percentage blank.':'Counts of satellite detections. A dash indicates unavailable data.'}</small>
       </section>
-      <section className="panel geo"><div className="sectionhead"><div><h2>Detection map</h2><p>{selected || 'Select a month'} · {map ? format(map.total)+' detections' : 'Monthly detections'}</p></div><label><span>Map product</span><select value={sensor} onChange={e=>setSensor(e.target.value)}>{[modis,viirs,noaa].map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label></div>
+      <section className="panel geo"><div className="sectionhead"><div><h2>Detection map</h2><p>{selected || 'Select a month'} Â· {map ? format(map.total)+' detections' : 'Monthly detections'}</p></div><label><span>Map product</span><select value={sensor} onChange={e=>setSensor(e.target.value)}>{[modis,viirs,noaa].map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label></div>
         <div className="header-actions">
           <button type="button" className="button" onClick={() => {
             if (drawing) setPolygon(vertices.map(pair=>pair.join(',')).join(';'));
@@ -170,12 +181,20 @@ function App() {
           }}>Clear</button>}
         </div>
         {drawing && <small>Click at least three points on the map, then apply.</small>}
-        <DetectionMap vertices={vertices} drawing={drawing} onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)} extent={regionInfo?.area ?? "79.5,5.8,82,10"} cells={map?.cells ?? []} loading={!!selected&&!map&&!mapError}/>
+        <div className="sensor-legend" aria-label="Hotspot sensor colors">
+          {Object.entries(sensorColors).map(([key,{fill,stroke}])=>(
+            <span key={key} data-active={sensor===key}>
+              <i aria-hidden="true" style={{background:fill,borderColor:stroke}}/>
+              {names[key]}{sensor===key && <span className="visually-hidden"> (selected)</span>}
+            </span>
+          ))}
+        </div>
+        <DetectionMap sensor={sensor} vertices={vertices} drawing={drawing} onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)} extent={regionInfo?.area ?? "79.5,5.8,82,10"} cells={map?.cells ?? []} loading={!!selected&&!map&&!mapError}/>
         {mapError && <small role="alert">{mapError}</small>}
-        {map && <small>{map.days} of {map.expected_days} daily partitions · <a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download detections</a></small>}
+        {map && <small>{map.days} of {map.expected_days} daily partitions Â· <a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download detections</a></small>}
       </section>
     </div>}
-    <footer>NASA FIRMS observations · Hotspots can include repeated detections and non-fire thermal sources.</footer>
+    <footer>NASA FIRMS observations Â· Hotspots can include repeated detections and non-fire thermal sources.</footer>
   </main>;
 }
 
