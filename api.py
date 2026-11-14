@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from analytics import evaluate_overlap, historical_anomalies
-from fire import ROOT, PRODUCTS, SOURCES, area_value, monthly, workspace
+from fire import ROOT, PRODUCTS, SOURCES, area_value, data_directory, monthly, workspace
 
 app = FastAPI(title="FireScope API")
 PILOT = "79.5,5.8,82,10"
@@ -169,7 +169,7 @@ def monthly_hotspots(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
 def regions():
     labels = {PILOT: "Sri Lanka", "101,14,102,15": "Central Thailand"}
     items = []
-    for marker in sorted((ROOT / "data").glob("*/area.txt")):
+    for marker in sorted(data_directory().glob("*/area.txt")):
         area = marker.read_text(encoding="utf-8").strip()
         if area != "demo":
             items.append({"id": "sri-lanka" if area == PILOT else area,

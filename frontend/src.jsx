@@ -6,7 +6,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 
-const base = '/api/fire';
+const base = (import.meta.env.VITE_API_BASE_URL || '/api/fire').replace(/\/+$/, '');
 const modis = 'MODIS_SP', viirs = 'VIIRS_SNPP_SP', noaa = 'VIIRS_NOAA20_SP';
 const names = {[modis]:'MODIS', [viirs]:'VIIRS S-NPP', [noaa]:'VIIRS NOAA-20', harmonized:'VIIRS-scale'};
 const months = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');

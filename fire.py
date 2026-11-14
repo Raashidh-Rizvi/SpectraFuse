@@ -12,11 +12,18 @@ from urllib.parse import quote
 
 import pandas as pd
 import requests
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 ROOT = Path(__file__).resolve().parent
+
+
+def data_directory():
+    configured = os.getenv("FIRESCOPE_DATA_DIR")
+    if configured is None:
+        configured = dotenv_values(ROOT / ".env.production").get("FIRESCOPE_DATA_DIR")
+    return Path(configured) if configured else ROOT / "data"
 SOURCES = ("MODIS_SP", "VIIRS_SNPP_SP")
 PRODUCTS = (*SOURCES, "VIIRS_NOAA20_SP")
 COLUMNS = ["latitude", "longitude", "acq_date", "acq_time", "satellite",
@@ -34,7 +41,7 @@ def area_value(value):
 
 
 def workspace(area):
-    return ROOT / "data" / (area if area in ("demo", "world") else
+    return data_directory() / (area if area in ("demo", "world") else
                             hashlib.sha256(area.encode()).hexdigest()[:16])
 
 

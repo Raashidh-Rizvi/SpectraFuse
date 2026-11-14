@@ -29,7 +29,7 @@ def main():
 
     frontend = STAGE / "frontend"
     frontend.mkdir(exist_ok=True)
-    for name in ("package.json", "package-lock.json", "index.html", "src.jsx", "style.css", "vite.config.js"):
+    for name in (".env.production", "package.json", "package-lock.json", "index.html", "src.jsx", "style.css", "vite.config.js"):
         shutil.copyfile(ROOT / "frontend" / name, frontend / name)
 
     with ZipFile(STAGE / "processed-data.zip", "w", compression=ZIP_DEFLATED) as archive:

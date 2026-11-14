@@ -138,3 +138,7 @@ npx vercel@latest deploy .vercel-stage
 Sign in when prompted and use the generated folder as a standalone Vercel project. Open the preview URL and check that the Sri Lanka dashboard and hotspot map load. Publish with `npx vercel@latest deploy .vercel-stage --prod` when the preview is ready.
 
 The staged deployment includes processed Parquet data and monthly summaries from the local dashboard regions. It requires an existing Sri Lanka dataset. It does not include the local .env or raw FIRMS downloads. The deployed dashboard serves a read-only snapshot and does not require a FIRMS key. To refresh it, sync the data locally, rerun the staging command, and redeploy. Use the CLI from this checkout because the datasets are ignored by Git.
+
+The frontend production environment file is `frontend/.env.production`. Its relative API URL, `/api/fire`, sends requests to FastAPI on the same Vercel domain. Vite embeds these settings in the browser bundle, so keep credentials out of this file.
+
+The backend reads the root `.env.production` when running locally. Copy `.env.production.example` to create it. Leave `FIRESCOPE_DATA_DIR` empty to use the bundled snapshot. On Vercel the bundled snapshot works with no environment variables. If a deployed runtime needs an override, set it in Vercel's environment settings.
