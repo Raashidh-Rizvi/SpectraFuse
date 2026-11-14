@@ -3,3 +3,15 @@
 @media(max-width:1000px){.calendar,.geo{grid-column:span 12}}
 @media(max-width:710px){.stat{grid-column:span 6}.trend,.compare{grid-column:span 12}.intro{align-items:start;flex-direction:column}.filters{width:100%}.filters label{flex:1}.chart{height:190px}.panel{padding:13px}.dashboard{gap:10px}.sectionhead{flex-wrap:wrap}}
 @media(max-width:390px){main{padding-inline:10px}.panel{padding:10px}.stat span{font-size:.72rem}.button{padding:8px}.stat strong{font-size:22px}}
+.header-actions{display:flex;align-items:center;gap:8px}
+.theme-button{cursor:pointer;min-height:38px}
+:root{--chart-label:#e2ebff}
+:root[data-theme=light]{color-scheme:light;color:#18264c;background:#e9efff;--chart-label:#23345d}
+[data-theme=light] body{background:radial-gradient(ellipse at 12% 0%,#fff,transparent 36%),radial-gradient(ellipse at 90% 24%,#b4c8ff,transparent 48%),linear-gradient(145deg,#dbe6fc,#f2f5ff)}
+[data-theme=light] .panel{background:linear-gradient(145deg,#ffffffd9,#dce7ffbc);border-color:#fff;box-shadow:0 8px 24px #344d831c}
+[data-theme=light] .trend{background:radial-gradient(ellipse at 68% 45%,#9eeefa9c,transparent 61%),linear-gradient(145deg,#fff,#cfdcff)}
+[data-theme=light] .button,[data-theme=light] select{color:#22335e;background:#f8faff;border-color:#aebede}
+[data-theme=light] p,[data-theme=light] small,[data-theme=light] label span,[data-theme=light] .stat em,[data-theme=light] .calendar th,[data-theme=light] footer{color:#34466b}
+[data-theme=light] .stat svg,[data-theme=light] a{color:#3746a1}
+[data-theme=light] .calendar button[aria-pressed=true]{outline-color:#1c2e74}
+[data-theme=light] .recharts-tooltip-wrapper{color:#fff}

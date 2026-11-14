@@ -98,3 +98,26 @@ Download additional NOAA-20 observations for the same extent:
 ```
 
 The dashboard sees newly completed NOAA-20 partitions on refresh. Re-run the command after the FIRMS quota replenishes to resume from completed days. For development, run the FastAPI server on port 8000 and run npm ci followed by npm run dev from the frontend folder.
+
+## Themes, regions, and deployment
+
+Use the sun or moon button to switch themes. FireScope initially follows the operating-system theme and remembers an explicit choice in the browser. The Region menu lists downloaded datasets. A geographic selection covers the extent shown by its dataset. Estimated months have MODIS provenance and an empirical error range derived from the monthly holdout.
+
+Run the original Sri Lanka NOAA-20 holdout comparison with:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/noaa20_validation.py
+```
+
+Build a container and attach a populated local data directory:
+
+```powershell
+docker build -t firescope .
+docker run --rm -p 127.0.0.1:8001:8001 --mount "type=bind,source=$((Resolve-Path data).Path),target=/app/data,readonly" firescope
+```
+
+For a hosted deployment, supply the same data directory as a persistent read-only volume and configure HTTPS on the hosting platform. The container only serves the processed data and does not require a FIRMS key. See SUBMISSION.md for the demonstration sequence.
+
+Run the repeatable browser checks from frontend with npx playwright install chromium, followed by npx playwright test. Start the React and FastAPI application first and point FIRESCOPE_TEST_URL at its address. The suite uses the real Sri Lanka pilot.
+
+To resume the complete Sri Lanka Standard Processing backfill, run scripts/history.ps1. The product availability API bounds each request to the available historical dates. The Central Thailand comparison uses the 101,14,102,15 bounding box for 2023. Polygon drawing filters the selected month's map and detection download.
