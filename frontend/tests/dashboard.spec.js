@@ -32,6 +32,10 @@ test('mobile hotspot colors follow the selected sensor', async ({page}) => {
   await page.getByRole('button',{name:/Mar 2022/}).click();
   const sensor = page.getByRole('combobox',{name:'Map product'});
   const map = page.locator('.geo .leaflet-overlay-pane');
+  for (const color of ['#e52e3e', '#ff861f', '#387df4']) {
+    await expect(map.locator('path[fill="'+color+'"]').first()).toBeAttached();
+  }
+  await expect(page.getByRole('checkbox',{name:/Harmonized.*Observed by VIIRS/})).toBeChecked();
   for (const [source, color, label] of [
     ['MODIS_SP','#e52e3e','MODIS'],
     ['VIIRS_SNPP_SP','#ff861f','VIIRS S-NPP'],

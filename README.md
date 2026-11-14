@@ -58,7 +58,7 @@ Run the API in a second PowerShell window from the project folder:
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-Interactive API documentation is available at http://127.0.0.1:8000/docs. The seven fire endpoints use the existing Parquet store. Use region=sri-lanka for the pilot and region=demo for synthetic data. Hotspots accept a UTC day and product code. Area analysis accepts a bounding box within the downloaded extent.
+Interactive API documentation is available at http://127.0.0.1:8000/docs. The fire endpoints use the existing Parquet store. Use region=sri-lanka for the pilot and region=demo for synthetic data. Hotspots accept a UTC day and product code. Area analysis accepts a bounding box within the downloaded extent.
 
 
 After both products finish, generate the pilot CSVs and interactive chart:
@@ -89,7 +89,26 @@ powershell -ExecutionPolicy Bypass -File backend/scripts/run-web.ps1
 
 Open http://127.0.0.1:8001 for the React dashboard and http://127.0.0.1:8001/docs for FastAPI. The launch script builds React and serves it with FastAPI on the same local address. The browser never needs the FIRMS key. The Leaflet basemap requires an internet connection.
 
-Choose a year and sensor basis, then select a calendar cell to inspect the three sensor totals and update the map. The anomaly view compares the selected series with prior observations for that calendar month. Monthly and detection CSVs are available from the dashboard. NOAA-20 is shown as a separate comparison product and does not enter the existing S-NPP calibration. Only complete NOAA-20 months enter the calendar.
+Choose a year and sensor basis, then select a calendar cell to compare the raw sensor totals with harmonized activity and update the map. The anomaly view compares the selected series with prior observations for that calendar month. Monthly and detection CSVs are available from the dashboard. NOAA-20 is shown as a separate comparison product and does not enter the existing S-NPP calibration. Only complete NOAA-20 months enter the calendar.
+
+### Data flow
+
+```mermaid
+flowchart LR
+  M[NASA FIRMS MODIS SP] --> MR[MODIS raw CSV and daily Parquet]
+  V[NASA FIRMS VIIRS S-NPP SP] --> VR[VIIRS S-NPP raw CSV and daily Parquet]
+  MR --> C[Paired monthly training and later holdout]
+  VR --> C
+  C --> H[Harmonized VIIRS-scale activity]
+  VR --> H
+  MR --> D[Dashboard trends, comparison and map]
+  VR --> D
+  H --> D
+```
+
+The map starts with MODIS raw, VIIRS S-NPP raw, and Harmonized enabled. The legend toggles each layer and reports archive partition coverage. Select a calendar month or enter an inclusive UTC date range of up to 31 days and a bounding box within the downloaded region. Polygon selection further restricts the box. The map reads the local NASA archive via `/api/fire/map-layers`. Use the sync command to add dates or regions.
+
+Raw map markers use recorded coordinates after validation and deduplication. A marker counts detections sharing that exact coordinate. Harmonized rectangles use an approximately 5 km angular grid and show activity inside the selected extent. For a fully covered date range they use observed S-NPP counts where available, or MODIS counts multiplied by the regional calibration factor when MODIS coverage is complete. Incomplete raw ranges show available detections and their partial status. A complete range with zero records is distinct from an unavailable range. The monthly holdout error describes regional monthly totals. The map has no validated uncertainty interval for a cell or custom date range.
 
 Download additional NOAA-20 observations for the same extent:
 

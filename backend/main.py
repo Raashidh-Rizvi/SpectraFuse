@@ -8,7 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.analytics import evaluate_overlap, historical_anomalies
-from backend.fire import ROOT, PRODUCTS, SOURCES, area_value, data_directory, monthly, workspace
+from backend.fire import (ROOT, PRODUCTS, SOURCES, area_value, calibration_factor,
+                          calibration_split, data_directory, monthly, workspace)
+
+from backend.grid import CELLS_PER_DEGREE, cell_indices
 
 app = FastAPI(title="SpectraFuse API")
 PILOT = "79.5,5.8,82,10"
@@ -140,6 +143,16 @@ def monthly_hotspots(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     files = sorted(path.glob(f"{month}-*.parquet"))
     columns = ["latitude", "longitude", "acq_date", "satellite", "confidence", "frp", "acquired_utc"]
     points = pd.concat((pd.read_parquet(file, columns=columns) for file in files), ignore_index=True) if files else pd.DataFrame(columns=columns)
+    points = within_polygon(points, polygon)
+    if csv:
+        return Response(points.to_csv(index=False), media_type="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename={source}-{month}.csv"})
+    cells = points[["latitude", "longitude"]].round(2).groupby(["latitude", "longitude"]).size().rename("count").reset_index()
+    return {"total": len(points), "days": len(files),
+            "expected_days": cal.monthrange(*map(int, month.split("-")))[1], "cells": records(cells)}
+
+
+def within_polygon(points, polygon):
     if polygon:
         import math
         try:
@@ -157,12 +170,72 @@ def monthly_hotspots(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
             if y1 != y2:
                 inside ^= ((y1 > y) != (y2 > y)) & (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)
         points = points[inside]
-    if csv:
-        return Response(points.to_csv(index=False), media_type="text/csv",
-                        headers={"Content-Disposition": f"attachment; filename={source}-{month}.csv"})
-    cells = points[["latitude", "longitude"]].round(2).groupby(["latitude", "longitude"]).size().rename("count").reset_index()
-    return {"total": len(points), "days": len(files),
-            "expected_days": cal.monthrange(*map(int, month.split("-")))[1], "cells": records(cells)}
+    return points
+
+
+@app.get("/api/fire/map-layers")
+def map_layers(start: date, end: date, region: str = "sri-lanka",
+               bbox: str | None = None,
+               polygon: str | None = Query(None, max_length=4000)):
+    expected = (end - start).days + 1
+    if not 1 <= expected <= 31:
+        raise HTTPException(422, "Select 1 to 31 inclusive UTC dates.")
+    area = resolve(region)
+    try:
+        extent = area_value(bbox) if bbox else area
+    except ValueError:
+        raise HTTPException(422, "Use west,south,east,north bounds.") from None
+    world = (-180, -90, 180, 90)
+    west, south, east, north = world if extent in ("world", "demo") else map(float, extent.split(","))
+    if area not in ("world", "demo"):
+        w, s, e, n = map(float, area.split(","))
+        if not (w <= west < east <= e and s <= south < north <= n):
+            raise HTTPException(422, "Bounds must lie within the downloaded extent.")
+
+    layers, points_by_source = {}, {}
+    columns = ["latitude", "longitude"]
+    for source in PRODUCTS:
+        root = workspace(area) / "processed" / source
+        files = sorted(path for path in root.glob("*.parquet") if str(start) <= path.stem <= str(end))
+        points = pd.concat([pd.read_parquet(path, columns=columns) for path in files],
+                           ignore_index=True) if files else pd.DataFrame(columns=columns, dtype=float)
+        points = within_polygon(points[points.latitude.between(south, north)
+                                      & points.longitude.between(west, east)], polygon)
+        points_by_source[source] = points
+        locations = points.groupby(columns).size().rename("count").reset_index()
+        layers[source] = {"source": source, "days": len(files), "total": len(points) if files else None,
+                          "status": "Complete" if len(files) == expected else "Partial" if files else "Unavailable",
+                          "features": records(locations)}
+
+    modis, viirs = SOURCES
+    grid = {"features": [], "total": None, "source": None, "days": 0, "status": "Unavailable",
+            "factor": None, "monthly_error_p90": None}
+    source, scale = viirs, 1
+    if layers[viirs]["days"] != expected:
+        source = modis
+        if layers[modis]["days"] == expected:
+            table = calendar_table(region)
+            scale = calibration_factor(calibration_split(table)[0])
+            if scale is not None:
+                _, metrics = evaluate_overlap(table)
+                grid["monthly_error_p90"] = float(
+                    metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"])
+        else:
+            scale = None
+    if scale is not None:
+        points = points_by_source[source]
+        step = 1 / CELLS_PER_DEGREE
+        cells = points.groupby(list(cell_indices(points))).size()
+        grid.update(source=source, days=expected, total=len(points) * scale,
+                    factor=scale if source == modis else None,
+                    status="Estimated from MODIS" if source == modis else "Observed by VIIRS",
+                    features=[{"south": y * step - 90, "west": x * step - 180,
+                               "north": min(90, (y + 1) * step - 90),
+                               "east": min(180, (x + 1) * step - 180),
+                               "count": count * scale} for (y, x), count in cells.items()])
+    layers["harmonized"] = grid
+    return {"expected_days": expected, "provenance": "Synthetic demo" if area == "demo"
+            else "NASA FIRMS Standard Processing", "layers": layers}
 
 
 @app.get("/api/fire/regions")

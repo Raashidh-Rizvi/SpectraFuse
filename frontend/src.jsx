@@ -1,17 +1,18 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity, CalendarDays, Download, Flame, Layers, MapPin, Moon, Orbit, Sun} from 'lucide-react';
-import {Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
+import {Activity, CalendarDays, Download, Flame, Layers, MapPin, Maximize2, Minimize2, Moon, Orbit, Sun} from 'lucide-react';
+import {Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 
 const base = (import.meta.env.VITE_API_BASE_URL || '/api/fire').replace(/\/+$/, '');
 const modis = 'MODIS_SP', viirs = 'VIIRS_SNPP_SP', noaa = 'VIIRS_NOAA20_SP';
-const names = {[modis]:'MODIS', [viirs]:'VIIRS S-NPP', [noaa]:'VIIRS NOAA-20', harmonized:'VIIRS-scale'};
+const names = {[modis]:'MODIS raw', [viirs]:'VIIRS S-NPP raw', [noaa]:'VIIRS NOAA-20 raw', harmonized:'Harmonized'};
 const sensorColors = {
   [modis]: {fill:'#e52e3e', stroke:'#7c1422'},
   [viirs]: {fill:'#ff861f', stroke:'#87300b'},
+  harmonized: {fill:'#387df4', stroke:'#1854aa'},
   [noaa]: {fill:'#de3476', stroke:'#791743'},
 };
 const months = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
@@ -19,11 +20,18 @@ const format = n => n == null ? 'â€”' : new Intl.NumberFormat('en', {maximu
 
 async function get(path, signal) {
   const response = await fetch(base + path, {signal});
-  if (!response.ok) throw new Error('Data could not be loaded. Check that FastAPI is running.');
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(typeof error?.detail === 'string' ? error.detail : 'Data could not be loaded. Check the filters and FastAPI connection.');
+  }
   return response.json();
 }
 
-function DetectionMap({cells, loading, sensor, extent, vertices, drawing, onVertex}) {
+const primaryLayers = [modis, viirs, 'harmonized'];
+const comparisonLayers = [...primaryLayers, noaa];
+const defaultExtent = '79.5,5.8,82,10';
+
+function DetectionMap({layers, enabled, loading, extent, vertices, drawing, onVertex}) {
   const element = useRef(null);
   const map = useRef(null);
   useEffect(() => {
@@ -37,15 +45,30 @@ function DetectionMap({cells, loading, sensor, extent, vertices, drawing, onVert
     return () => {observer.disconnect(); view.remove();};
   }, []);
   useEffect(() => {
-    const group = L.layerGroup(cells.map(cell => L.circleMarker([cell.latitude,cell.longitude], {
-      color:sensorColors[sensor].stroke, fillColor:sensorColors[sensor].fill, fillOpacity:.93, weight:1.5, radius:Math.min(23,4+Math.sqrt(cell.count))
-    }).bindTooltip(names[sensor] + ': ' + format(cell.count) + ' detections'))).addTo(map.current);
+    const group = L.layerGroup().addTo(map.current);
+    for (const key of ['harmonized', modis, viirs, noaa]) {
+      if (!enabled.includes(key)) continue;
+      const layer = layers?.[key];
+      const {fill, stroke} = sensorColors[key];
+      for (const cell of layer?.features ?? []) {
+        const style = {color:stroke, fillColor:fill, weight:1.5};
+        const shape = key === 'harmonized'
+          ? L.rectangle([[cell.south,cell.west],[cell.north,cell.east]], {
+              ...style, fillOpacity:Math.min(.8,.22 + Math.log1p(cell.count)/8)
+            })
+          : L.circleMarker([cell.latitude,cell.longitude], {
+              ...style, fillOpacity:.8, radius:Math.min(12,3+Math.sqrt(cell.count))
+            });
+        shape.bindTooltip(names[key] + ': ' + format(cell.count) +
+          (key === 'harmonized' ? ' VIIRS-scale activity · ' + layer.status : ' detections')).addTo(group);
+      }
+    }
     return () => group.remove();
-  }, [cells,sensor]);
+  }, [layers,enabled]);
   useEffect(() => {
     const [w,s,e,n] = extent.split(",").map(Number);
-    if (Number.isFinite(n)) map.current.fitBounds([[s,w],[n,e]]);
-    else map.current.setView([0,0],2);
+    if ([w,s,e,n].every(Number.isFinite) && w >= -180 && w < e && e <= 180 && s >= -90 && s < n && n <= 90) map.current.fitBounds([[s,w],[n,e]]);
+    else if (extent === 'world') map.current.setView([0,0],2);
   }, [extent]);
   useEffect(() => {
     if (!drawing) return;
@@ -87,8 +110,30 @@ function App() {
   const [polygon,setPolygon] = useState('');
   const polygonQuery = polygon ? '&polygon='+encodeURIComponent(polygon) : '';
   const [selected,setSelected] = useState(''), [sensor,setSensor] = useState(viirs);
+  const [mapExpanded, setMapExpanded] = useState(false);
+  useEffect(() => {
+    if (!mapExpanded) return;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const close = event => {
+      if (event.key === 'Escape') setMapExpanded(false);
+    };
+    window.addEventListener('keydown', close);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener('keydown', close);
+    };
+  }, [mapExpanded]);
+  const [enabled,setEnabled] = useState(primaryLayers);
+  const [filter,setFilter] = useState(null);
+  const extent = regionInfo?.area ?? defaultExtent;
+  const monthEnd = selected ? new Date(Date.UTC(+selected.slice(0,4),+selected.slice(5),0)).getUTCDate() : '';
+  const defaults = {start:selected+'-01',end:selected+'-'+monthEnd,bbox:extent};
+  const activeFilter = filter?.month === selected && filter.region === region ? filter : defaults;
   const [mapResult,setMap] = useState(null), [error,setError] = useState(''), [mapError,setMapError] = useState('');
-  const mapPath = '/monthly-hotspots?month='+selected+'&source='+sensor+'&'+query+polygonQuery;
+  const mapPath = '/map-layers?'+query+polygonQuery+'&'+new URLSearchParams({
+    start:activeFilter.start,end:activeFilter.end,bbox:activeFilter.bbox
+  });
   const map = mapResult?.path === mapPath ? mapResult.data : null;
   const [percent,setPercent] = useState(false);
   useEffect(() => {
@@ -97,7 +142,7 @@ function App() {
     Promise.all([get('/dashboard?'+query,controller.signal),get('/sensor-comparison?'+query,controller.signal)])
       .then(([data,comparison]) => {
         setRows(data); setMetrics(comparison.metrics);
-        setSelected(data.findLast(row => row[viirs] != null)?.month ?? '');
+        setSelected(data.findLast(row => row[viirs] != null)?.month ?? data.at(-1)?.month ?? '');
       }).catch(err => {if (!controller.signal.aborted) setError(err.message);});
     return () => controller.abort();
   }, [query]);
@@ -120,7 +165,7 @@ function App() {
   const noaaMonths = rows.filter(row => row[noaa] != null).length;
   const anomalyKey = measure + '_anomaly';
   const maximum = Math.max(1,...visible.map(row => percent ? Math.abs(row[anomalyKey] ?? 0) : row[measure] ?? 0));
-  const chart = visible.map(row => ({...row, activity:row[measure]}));
+  const chart = visible;
   const errorMetric = metrics.find(row => row.Method === 'Calibrated MODIS');
   return <main>
     <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
@@ -141,17 +186,18 @@ function App() {
       <section className="panel stat"><span><Flame size={17}/> {names[measure]} detections</span><strong>{active.length ? format(total) : 'â€”'}</strong><small>Sum across selected months</small></section>
       <section className="panel stat dark"><span><Activity size={17}/> Peak activity</span><strong>{peak?.month ?? 'â€”'}</strong><small>{format(peak?.[measure])} detections</small></section>
       <section className="panel stat"><span><Orbit size={17}/> NOAA-20 coverage</span><strong>{noaaMonths}<em> / {rows.length}</em></strong><small>Complete months across the pilot</small></section>
-      <section className="panel trend"><h2>Historical activity</h2><p>{names[measure]} monthly detections</p>
+      <section className="panel trend"><h2>Historical activity</h2><p>Monthly counts and VIIRS-scale activity</p>
         <div className="chart"><ResponsiveContainer><AreaChart data={chart} margin={{left:1,right:13,top:10,bottom:0}}>
-          <defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#8ef5ff" stopOpacity=".85"/><stop offset="100%" stopColor="#454cf9" stopOpacity=".16"/></linearGradient></defs>
           <CartesianGrid vertical={false} stroke="#c5d1ff35"/><XAxis dataKey="month" tick={{fill:'var(--chart-label)',fontSize:11}} minTickGap={28}/><YAxis width={49} tick={{fill:'var(--chart-label)',fontSize:11}}/>
-          <Tooltip contentStyle={{background:'#1b2450',border:'1px solid #8ba0dd',borderRadius:10}} formatter={value=>[format(value),'Detections']}/>
-          <Area type="monotone" dataKey="activity" stroke="#a0f8ff" strokeWidth={2} fill="url(#area)"/>
+          <Tooltip contentStyle={{background:'#1b2450',border:'1px solid #8ba0dd',borderRadius:10}} formatter={(value,name)=>[format(value),name]}/>
+          <Legend/>
+          {primaryLayers.map(key=><Area key={key} type="linear" dataKey={key} name={names[key]}
+            stroke={sensorColors[key].fill} strokeWidth={2} strokeDasharray={key==='harmonized'?'5 3':undefined} fill="none"/>)}
         </AreaChart></ResponsiveContainer></div>
       </section>
-      <section className="panel compare dark"><h2>Sensor comparison</h2><p>{selected || 'Select a month'}</p><div className="chart"><ResponsiveContainer><BarChart data={[modis,viirs,noaa].map(key=>({name:names[key],count:selectedRow?.[key]}))}>
+      <section className="panel compare dark"><h2>Sensor comparison</h2><p>{selected || 'Select a month'}</p><div className="chart"><ResponsiveContainer><BarChart data={comparisonLayers.map(key=>({name:names[key],count:selectedRow?.[key]}))}>
         <CartesianGrid vertical={false} stroke="#c5d1ff25"/><XAxis dataKey="name" tick={{fill:'var(--chart-label)',fontSize:10}}/><YAxis width={42} tick={{fill:'var(--chart-label)',fontSize:10}}/><Tooltip contentStyle={{background:'#242e59'}}/><Bar dataKey="count" name="Detections" radius={[5,5,0,0]}>
-          {Object.entries(sensorColors).map(([key,{fill}])=><Cell key={key} fill={fill}/>)}
+          {comparisonLayers.map(key=><Cell key={key} fill={sensorColors[key].fill}/>)}
         </Bar>
         </BarChart></ResponsiveContainer></div>{selectedRow?.estimate_low != null && <p>Estimated from MODIS · empirical error range {format(selectedRow.estimate_low)}–{format(selectedRow.estimate_high)}</p>}
         <small>Held-out monthly MAE: {format(errorMetric?.MAE)} detections</small></section>
@@ -170,7 +216,28 @@ function App() {
         </tbody></table></div>
         <small>{percent?'Percent departure from the median of at least two prior values for the same month. A zero median leaves the percentage blank.':'Counts of satellite detections. A dash indicates unavailable data.'}</small>
       </section>
-      <section className="panel geo"><div className="sectionhead"><div><h2>Detection map</h2><p>{selected || 'Select a month'} Â· {map ? format(map.total)+' detections' : 'Monthly detections'}</p></div><label><span>Map product</span><select value={sensor} onChange={e=>setSensor(e.target.value)}>{[modis,viirs,noaa].map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label></div>
+      <section className={mapExpanded ? "panel geo geo-expanded" : "panel geo"}><div className="sectionhead"><div><h2>Detection map</h2>
+        <p>{selected || 'Select a month'} · {map?.provenance ?? 'NASA FIRMS Standard Processing'}</p></div>
+        <label><span>Map product</span><select value={sensor} onChange={e=>{
+          setSensor(e.target.value);
+          setEnabled(previous=>[...new Set([...previous,e.target.value])]);
+        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label></div>
+        <button type="button" className="button map-expand" aria-pressed={mapExpanded}
+          onClick={() => setMapExpanded(value => !value)}>
+          {mapExpanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}
+          {mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
+        </button>
+        <form className="map-filters" key={region+selected+extent} onSubmit={event=>{
+          event.preventDefault();
+          const values = new FormData(event.currentTarget);
+          setFilter({region,month:selected,start:values.get('start'),end:values.get('end'),bbox:values.get('bbox').trim()});
+        }}>
+          <label>Start date (UTC)<input name="start" type="date" required defaultValue={activeFilter.start}/></label>
+          <label>End date (UTC)<input name="end" type="date" required defaultValue={activeFilter.end}/></label>
+          <label>Bounding box<input name="bbox" required defaultValue={activeFilter.bbox}
+            aria-label="Bounding box west,south,east,north"/></label>
+          <button type="submit" className="button">Apply filters</button>
+        </form>
         <div className="header-actions">
           <button type="button" className="button" onClick={() => {
             if (drawing) setPolygon(vertices.map(pair=>pair.join(',')).join(';'));
@@ -182,17 +249,34 @@ function App() {
           }}>Clear</button>}
         </div>
         {drawing && <small>Click at least three points on the map, then apply.</small>}
-        <div className="sensor-legend" aria-label="Hotspot sensor colors">
-          {Object.entries(sensorColors).map(([key,{fill,stroke}])=>(
-            <span key={key} data-active={sensor===key}>
-              <i aria-hidden="true" style={{background:fill,borderColor:stroke}}/>
-              {names[key]}{sensor===key && <span className="visually-hidden"> (selected)</span>}
-            </span>
-          ))}
+        <div className="sensor-legend" aria-label="Map layers">
+          {comparisonLayers.map(key=>{
+            const {fill,stroke} = sensorColors[key];
+            const layer = map?.layers[key];
+            return <label key={key} data-active={sensor===key}>
+              <input type="checkbox" checked={enabled.includes(key)} onChange={event=>{
+                const checked = event.target.checked;
+                setEnabled(previous=>checked ? [...previous,key] : previous.filter(item=>item!==key));
+              }}/>
+              <i aria-hidden="true" style={{background:fill,borderColor:stroke,borderRadius:key==='harmonized'?0:'50%'}}/>
+              {names[key]}{layer && ' · '+layer.status+' · '+format(layer.total)}
+              {layer && key!=='harmonized' && ' ('+layer.days+'/'+map.expected_days+' days)'}
+            </label>;
+          })}
         </div>
-        <DetectionMap sensor={sensor} vertices={vertices} drawing={drawing} onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)} extent={regionInfo?.area ?? "79.5,5.8,82,10"} cells={map?.cells ?? []} loading={!!selected&&!map&&!mapError}/>
+        <DetectionMap layers={map?.layers} enabled={enabled} vertices={vertices} drawing={drawing}
+          onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
+          extent={activeFilter.bbox} loading={!!selected&&!map&&!mapError}/>
         {mapError && <small role="alert">{mapError}</small>}
-        {map && <small>{map.days} of {map.expected_days} daily partitions Â· <a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download detections</a></small>}
+        {map?.layers.harmonized.factor != null && <small>
+          MODIS counts scaled by {format(map.layers.harmonized.factor)}. Regional monthly holdout
+          90th-percentile absolute error: {format(map.layers.harmonized.monthly_error_p90)} detections.
+          Cell-level uncertainty is unavailable.
+        </small>}
+        {map?.layers.harmonized.status === 'Observed by VIIRS' && <small>
+          Harmonized cells contain observed S-NPP counts. Partition coverage cannot establish satellite coverage.
+        </small>}
+        {selected && sensor !== 'harmonized' && <small><a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download calendar-month detections</a></small>}
       </section>
     </div>}
     <footer>NASA FIRMS observations Â· Hotspots can include repeated detections and non-fire thermal sources.</footer>

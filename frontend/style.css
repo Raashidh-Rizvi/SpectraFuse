@@ -22,3 +22,27 @@
 .sensor-legend i{width:11px;height:11px;border:1px solid;border-radius:50%;flex:none}
 .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 @media(max-width:710px){.geo .map{height:clamp(270px,44vh,365px)}.geo select,.geo button{min-height:44px}}
+
+.map-filters {display:flex; flex-wrap:wrap; align-items:end; gap:.65rem; margin:.75rem 0;}
+.map-filters label {display:grid; gap:.25rem; font-size:.85rem; max-width:100%;}
+.map-filters input {font:inherit; color:inherit; background:transparent; border:1px solid currentColor; border-radius:.4rem; padding:.4rem;}
+.sensor-legend label {display:inline-flex; align-items:center; gap:.35rem;}
+.sensor-legend i {display:inline-block; width:.65rem; height:.65rem; border:1px solid;}
+
+.map-expand {margin-top:.65rem;}
+.geo.geo-expanded {
+  position:fixed;
+  inset:0;
+  z-index:1100;
+  border:0;
+  border-radius:0;
+  background-color:var(--page-bg,#25305b);
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  overflow:auto;
+}
+.geo-expanded .map-expand {align-self:flex-start;}
+.geo-expanded .mapwrap {flex:1 0 240px; display:flex;}
+.geo-expanded .map {height:auto; width:100%;}
+:root[data-theme=light] .geo.geo-expanded {background-color:#eff4ff;}

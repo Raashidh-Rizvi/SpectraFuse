@@ -1,6 +1,6 @@
 import pandas as pd
 
-from backend.fire import SOURCES
+from backend.fire import SOURCES, calibration_factor, calibration_split
 
 
 def historical_anomalies(series):
@@ -15,12 +15,10 @@ def historical_anomalies(series):
 
 def evaluate_overlap(table):
     modis, viirs = SOURCES
-    paired = table[list(SOURCES)].dropna()
-    size = max(1, len(paired) // 4)
-    train, test = paired.iloc[:-size], paired.iloc[-size:]
-    if len(train) < 3 or min(train.sum()) <= 0:
+    train, test = calibration_split(table)
+    factor = calibration_factor(train)
+    if factor is None:
         return pd.DataFrame(), pd.DataFrame()
-    factor = train[viirs].sum() / train[modis].sum()
     comparison = test.rename(columns={modis: "Raw MODIS", viirs: "VIIRS reference"})
     comparison["Calibrated MODIS"] = comparison["Raw MODIS"] * factor
     reference = comparison["VIIRS reference"]

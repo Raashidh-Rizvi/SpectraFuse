@@ -125,6 +125,9 @@ def get(session, path):
 
 
 def sync(area, start, end, sources=SOURCES):
+    area = area_value(area)
+    if start > end:
+        raise ValueError("Start must be on or before end.")
     load_dotenv(ROOT / ".env")
     key = os.getenv("FIRMS_MAP_KEY", "").strip()
     if not key:
@@ -183,6 +186,19 @@ def sync(area, start, end, sources=SOURCES):
                     partition(area, source, requested, buffer.getvalue().encode())
 
 
+def calibration_split(table):
+    paired = table[list(SOURCES)].dropna()
+    size = max(1, len(paired) // 4)
+    return paired.iloc[:-size], paired.iloc[-size:]
+
+
+def calibration_factor(training):
+    totals = training[list(SOURCES)].sum()
+    if len(training) >= 3 and totals.gt(0).all():
+        return float(totals[SOURCES[1]] / totals[SOURCES[0]])
+    return None
+
+
 def monthly(area, bounds=None):
     root = workspace(area)
     records = []
@@ -210,14 +226,12 @@ def monthly(area, bounds=None):
         index="month", columns="source", values="count").reindex(columns=list(SOURCES))
     table = table.reindex(pd.period_range(table.index.min(), table.index.max(), freq="M").astype(str))
     table.index.name = "month"
-    paired = table.dropna()
-    heldout = paired.iloc[-max(1, len(paired) // 4):]
-    training = paired.iloc[:len(paired) - len(heldout)]
-    metrics = {"paired_months": len(paired), "training_months": len(training),
+    training, heldout = calibration_split(table)
+    metrics = {"paired_months": len(training) + len(heldout), "training_months": len(training),
                "holdout_months": len(heldout)}
     modis, viirs = SOURCES
-    if len(training) >= 3 and training[modis].sum() > 0 and training[viirs].sum() > 0:
-        factor = training[viirs].sum() / training[modis].sum()
+    factor = calibration_factor(training)
+    if factor is not None:
         metrics.update(factor=float(factor),
                        raw_mae=float((heldout[modis] - heldout[viirs]).abs().mean()),
                        adjusted_mae=float((heldout[modis] * factor - heldout[viirs]).abs().mean()))
@@ -260,8 +274,6 @@ def main():
     try:
         area = "demo" if args.command == "demo" or args.area == "demo" and args.command == "build" else area_value(args.area)
         if args.command == "sync":
-            if args.start > args.end:
-                raise ValueError("Start must be on or before end.")
             sync(area, args.start, args.end, args.source or SOURCES)
         if args.command == "demo":
             demo()

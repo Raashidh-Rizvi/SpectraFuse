@@ -36,8 +36,11 @@ def main():
     }.items():
         atomic(output / f"{name}.csv", lambda path: frame.to_csv(path, index=name != "daily-grid"))
 
-    figure = px.line(pilot[list(SOURCES)], title=f"Sri Lanka pilot · {paired}/72 paired months",
-                     labels={"month": "UTC month", "value": "Detections", "variable": "Product"})
+    series = pilot[[*SOURCES, "harmonized"]].rename(columns={
+        SOURCES[0]: "MODIS raw", SOURCES[1]: "VIIRS S-NPP raw", "harmonized": "Harmonized"})
+    figure = px.line(series, title=f"Sri Lanka pilot · {paired}/72 paired months",
+                     labels={"month": "UTC month", "value": "Detection count or VIIRS-scale activity", "variable": "Product"})
+    figure.update_traces(line_dash="dash", selector={"name": "Harmonized"})
     atomic(output / "monthly-comparison.html", lambda path: figure.write_html(path))
     print(f"Detected MODIS: {int(pilot[SOURCES[0]].sum()):,}; VIIRS: {int(pilot[SOURCES[1]].sum()):,}")
     print(f"Grid-days occupied by both products: {(cells[list(SOURCES)] > 0).all(axis=1).sum():,} / {len(cells):,}")

@@ -4,6 +4,15 @@ import pandas as pd
 from backend.fire import SOURCES, workspace
 
 
+CELLS_PER_DEGREE = 22.2
+
+
+def cell_indices(points):
+    y = np.floor((points.latitude.clip(upper=89.999999) + 90) * CELLS_PER_DEGREE)
+    x = np.floor((points.longitude.clip(upper=179.999999) + 180) * CELLS_PER_DEGREE)
+    return y.astype(int).rename("y"), x.astype(int).rename("x")
+
+
 def daily_grid(area, start, end):
     """Match detections by UTC day and shared approximately 5 km geographic cell."""
     root = workspace(area) / "processed"
@@ -14,9 +23,7 @@ def daily_grid(area, start, end):
         counts = []
         for source, partitions in zip(SOURCES, days):
             points = pd.read_parquet(partitions[day], columns=["latitude", "longitude"])
-            points["y"] = np.floor((points.latitude + 90) * 22.2).astype(int)
-            points["x"] = np.floor((points.longitude + 180) * 22.2).astype(int)
-            counts.append(points.groupby(["y", "x"]).size().rename(source))
+            counts.append(points.groupby(list(cell_indices(points))).size().rename(source))
         paired = pd.concat(counts, axis=1).fillna(0).astype(int).reset_index()
         paired.insert(0, "day", day)
         records.append(paired)
