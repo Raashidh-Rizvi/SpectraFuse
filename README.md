@@ -1,0 +1,43 @@
+# FireScope
+
+FireScope builds a monthly active-fire calendar from NASA FIRMS MODIS Standard Processing and VIIRS Suomi-NPP Standard Processing. It preserves raw CSV, validates daily observations, writes Parquet, and estimates earlier MODIS activity on a VIIRS detection-count scale.
+
+## Run on Windows
+
+From PowerShell in the project folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe fire.py demo
+powershell -ExecutionPolicy Bypass -File .\scripts\run.ps1
+```
+
+Open http://127.0.0.1:8501. Select **Synthetic demo** to explore without credentials.
+
+## Download NASA observations
+
+Request a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/) and enter it as the value of FIRMS_MAP_KEY in the local .env file. Setup creates this file from .env.example if needed. Keep .env private. A process environment variable takes precedence.
+
+```powershell
+.\.venv\Scripts\python.exe fire.py sync --area '79.5,5.8,82,10' --start 2018-01-01 --end 2023-12-31
+```
+
+The example uses a Sri Lanka bounding box. Dates are inclusive UTC dates. Use west,south,east,north or world. Start with a single full month to check access and download size. The [FIRMS Area API](https://firms.modaps.eosdis.nasa.gov/api/area) uses a transaction quota, and worldwide VIIRS requests can return many detections per day. Sync intersects the requested dates with each product's reported [availability](https://firms.modaps.eosdis.nasa.gov/api/data_availability/).
+
+Each extent has its own folder under data, with its extent in area.txt. The raw/ and processed/ directories retain per-sensor, per-day CSV and Parquet. Re-run the same sync command to resume. A validated raw file is reused if its Parquet is missing. Completely processed days are skipped, including header-only days. To rebuild just the monthly exports:
+
+```powershell
+.\.venv\Scripts\python.exe fire.py build --area '79.5,5.8,82,10'
+```
+
+Monthly exports live in harmonized/monthly.csv and harmonized/monthly.parquet. A month contributes a sensor total only when every calendar day has a processed partition. This measures request completeness. Coverage gaps within a successful NASA response can still affect detection counts. The downloader stops on an invalid response and retries transient HTTP failures with backoff.
+
+## Method and validation
+
+The pipeline validates coordinates, acquisition date and time, confidence, day/night flag, and finite nonnegative fire radiative power. It removes repeat records with the same sensor, satellite, coordinates, and timestamp. Native confidence is retained alongside descriptive classes. The one-degree grid columns store the lower-left coordinates of each detection's cell.
+
+The model fits a single regional multiplier using the ratio of total VIIRS to total MODIS detections over the earlier paired months. It reserves the latest quarter of paired months, with at least one, to compare unscaled and scaled mean absolute error. Three training months and positive totals are required. The calendar uses observed VIIRS where available and scaled MODIS wherever MODIS has a complete total and VIIRS is unavailable. Blank cells indicate missing values. The dashboard can recalculate for a smaller extent, show monthly trends and seasonal departures, and export the selected period.
+
+This regional baseline assumes a stable detection ratio through time. Sensor resolution, overpass frequency, cloud cover, and other differences can change that ratio. Detection counts describe observed hotspot activity. They do not measure burned area or unique wildfire events. Seasonal departures are descriptive and calculated from all loaded years with at least two values for the same calendar month.
+
