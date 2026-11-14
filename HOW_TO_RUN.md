@@ -42,3 +42,30 @@ npx vercel@latest deploy --cwd .vercel-stage --archive=tgz
 ```
 
 Select the existing `spectra-fuse-kbpe` project if you are updating the current site. Check the dashboard and `/api/fire/regions` on the same preview domain. To publish a verified build, run the deploy command again with `--prod`. If Vercel blocks a CLI deployment because the Git commit author lacks team access, deploy the linked staging folder from outside the Git checkout or use a team-authorized commit.
+
+## Ask about the dataset
+
+Set `OPENAI_API_KEY` and `OPENAI_MODEL` in the project `.env` or in the
+backend environment. Choose a model supported by your OpenAI project that
+accepts Chat Completions and has enough context for the selected archive.
+Restart FastAPI, select a region and open **Ask about the dataset**.
+The backend sends your question, recent chat turns and the region's monthly
+aggregates to OpenAI. The API key stays on the backend. Configure access
+controls at the hosting layer before enabling a paid API key on a public site.
+
+Try asking "Compare MODIS and VIIRS S-NPP in 2024 using months where both
+have coverage. Report matched totals and the strongest anomaly." The system
+prompt lives in `backend/chat.py`. Chat covers monthly detections, estimates,
+coverage, anomalies and calibration metrics. Raw coordinates and FRP are
+outside the chat evidence. The selected region governs chat independently
+of the chart's year and sensor filters.
+
+To ingest a period from NASA FIRMS, set `FIRMS_MAP_KEY` and run:
+
+```powershell
+.venv/Scripts/python.exe -m backend.fire sync --area "79.5,5.8,82,10" --start 2025-01-01 --end 2025-01-31 --source MODIS_SP --source VIIRS_SNPP_SP --source VIIRS_NOAA20_SP
+```
+
+The sync stores daily raw CSV and validated Parquet under `data/` (or
+`FIRESCOPE_DATA_DIR`) and rebuilds the monthly table the dashboard and
+chat read. Run sync on a machine with writable persistent storage.

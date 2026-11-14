@@ -18,7 +18,8 @@ def main():
 
     STAGE.mkdir(exist_ok=True)
     (STAGE / "backend").mkdir(exist_ok=True)
-    for name in ("backend/__init__.py", "backend/main.py", "backend/analytics.py", "backend/fire.py"):
+    for name in ("backend/__init__.py", "backend/main.py", "backend/analytics.py", "backend/fire.py",
+                 "backend/grid.py", "backend/chat.py"):
         shutil.copyfile(ROOT / name, STAGE / name)
 
     requirements = (ROOT / "requirements.txt").read_text().splitlines()
@@ -33,7 +34,8 @@ def main():
 
     frontend = STAGE / "frontend"
     frontend.mkdir(exist_ok=True)
-    for name in (".env.production", "package.json", "package-lock.json", "index.html", "src.jsx", "style.css", "vite.config.js"):
+    for name in (".env.production", "package.json", "package-lock.json", "index.html",
+                 "src.jsx", "DatasetChat.jsx", "style.css", "vite.config.js"):
         shutil.copyfile(ROOT / "frontend" / name, frontend / name)
 
     with ZipFile(STAGE / "processed-data.zip", "w", compression=ZIP_DEFLATED) as archive:

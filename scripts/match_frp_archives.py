@@ -1,4 +1,4 @@
-"""Export every MODIS and NOAA-21 pair within the configured limits."""
+"""Export every MODIS and NOAA-20 pair within the configured limits."""
 
 import argparse
 import csv
@@ -10,9 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "sri-lanka-2000-2025"
-MODIS_CSV = DATA / "modis" / "fire_archive_M-C61_847603.csv"
-VIIRS_CSV = DATA / "viirs-jpss1" / "fire_archive_J2V-C2_847605.csv"
-OUTPUT = ROOT / "data" / "frp-plots" / "modis-noaa21-matches.csv"
+MODIS_CSV = DATA / "MODIS_SP.csv"
+VIIRS_CSV = DATA / "VIIRS_NOAA20_SP.csv"
+OUTPUT = ROOT / "data" / "frp-plots" / "modis-noaa20-matches.csv"
 PROCESSED = ROOT / "data" / "processed data"
 MAX_KM = 0.5
 MAX_MINUTES = 10
@@ -72,6 +72,8 @@ def main():
         writer.writerow(["modis_record", "viirs_record", "time_difference_minutes", "distance_km"]
                         + [f"{sensor}_{field}" for sensor in ("modis", "viirs") for field in fields])
         for index, minute, lat, lon, modis in detections(MODIS_CSV):
+            if modis["satellite"] != "Aqua":
+                continue
             lat_bin = math.floor(lat / bin_degrees)
             for time_bin in range((minute - MAX_MINUTES) // MAX_MINUTES,
                                   (minute + MAX_MINUTES) // MAX_MINUTES + 1):
@@ -93,7 +95,7 @@ def main():
     if not args.merged_only:
         PROCESSED.mkdir(parents=True, exist_ok=True)
         export_matched_records(MODIS_CSV, PROCESSED / "modis_matched.csv", matched_modis)
-        export_matched_records(VIIRS_CSV, PROCESSED / "viirs_noaa21_matched.csv", matched_viirs)
+        export_matched_records(VIIRS_CSV, PROCESSED / "viirs_noaa20_matched.csv", matched_viirs)
     print(f"Filtered records: {len(matched_modis):,} MODIS, {len(matched_viirs):,} VIIRS")
 
     print(f"VIIRS platform codes: {', '.join(sorted(satellites))}")

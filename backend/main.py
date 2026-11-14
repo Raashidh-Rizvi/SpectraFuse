@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.analytics import evaluate_overlap, historical_anomalies
+from backend.chat import ChatRequest, answer, evidence
 from backend.fire import (ROOT, PRODUCTS, SOURCES, area_value, calibration_factor,
                           calibration_split, data_directory, monthly, workspace)
 
@@ -248,6 +249,17 @@ def regions():
             items.append({"id": "sri-lanka" if area == PILOT else area,
                           "label": labels.get(area, area), "area": area})
     return items
+
+
+@app.post("/api/fire/chat")
+def chat(request: ChatRequest):
+    frame = dashboard_frame(request.region)
+    if frame.empty:
+        raise HTTPException(404, "This dataset has no monthly records.")
+    _, metrics = evaluate_overlap(frame)
+    data = evidence(frame, metrics, request.region)
+    return {"answer": answer(request, data), "source": data["source"],
+            "first_month": frame.index.min(), "last_month": frame.index.max()}
 
 
 frontend = ROOT / "frontend" / "dist"

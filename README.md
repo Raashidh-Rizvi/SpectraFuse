@@ -1,5 +1,8 @@
 # SpectraFuse
 
+See the [project reference](docs/PROJECT_REFERENCE.md) for the dataset inventory,
+calibration methods, FRP experiments, API reference, and verification steps.
+
 SpectraFuse builds a monthly active-fire calendar from NASA FIRMS MODIS Standard Processing and VIIRS Suomi-NPP Standard Processing. It preserves raw CSV, validates daily observations, writes Parquet, and estimates earlier MODIS activity on a VIIRS detection-count scale.
 
 ## Run on Windows
