@@ -43,6 +43,7 @@ def main():
     config = {
         "$schema": "https://openapi.vercel.sh/vercel.json",
         "framework": "fastapi",
+        "rewrites": [{"source": "/", "destination": "/index.html"}],
         "buildCommand": "npm --prefix frontend ci --include=dev && npm --prefix frontend run build -- --outDir ../public && python -m zipfile -e processed-data.zip .",
         "functions": {
             "main.py": {
