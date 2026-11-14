@@ -132,10 +132,10 @@ From the repository root, run:
 
 ```powershell
 python scripts/stage_vercel.py
-npx vercel@latest deploy .vercel-stage
+npx vercel@latest deploy --cwd .vercel-stage --archive=tgz
 ```
 
-Sign in when prompted and select or create one Vercel project for .vercel-stage. That project serves the React dashboard at / and runs FastAPI at /api/fire on the same domain. Use the same linked project for the production deploy. Open the preview URL and check that the Sri Lanka dashboard and hotspot map load. Publish with `npx vercel@latest deploy .vercel-stage --prod` when the preview is ready.
+Sign in when prompted and select or create one Vercel project for .vercel-stage. That project serves the React dashboard at / and runs FastAPI at /api/fire on the same domain. Use the same linked project for the production deploy. Open the preview URL and check that the Sri Lanka dashboard and hotspot map load. Publish with `npx vercel@latest deploy --cwd .vercel-stage --archive=tgz --prod` when the preview is ready.
 
 The staged deployment includes processed Parquet data and monthly summaries from the local dashboard regions. It requires an existing Sri Lanka dataset. It does not include the local .env or raw FIRMS downloads. The deployed dashboard serves a read-only snapshot and does not require a FIRMS key. To refresh it, sync the data locally, rerun the staging command, and redeploy. Deploy .vercel-stage with the CLI so Vercel receives the generated configuration and data archive.
 

@@ -12,3 +12,6 @@ frontend/playwright-report/
 
 /.env.production
 **/.env.*.local
+
+.vercel/
+.env.local

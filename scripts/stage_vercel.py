@@ -24,7 +24,10 @@ def main():
     runtime = [line for line in requirements if line.split("==")[0] in RUNTIME]
     (STAGE / "requirements.txt").write_text("\n".join(runtime) + "\n")
     (STAGE / ".python-version").write_text("3.13\n")
-    (STAGE / "pyproject.toml").write_text('[tool.vercel]\nentrypoint = "main:app"\n')
+    (STAGE / "pyproject.toml").write_text(
+        '[project]\nname = "firescope"\nversion = "0.1.0"\nrequires-python = "==3.13.*"\n'
+        f'dependencies = {json.dumps(runtime)}\n\n[tool.vercel]\nentrypoint = "main:app"\n'
+    )
     (STAGE / "package.json").write_text(json.dumps({"private": True, "engines": {"node": "22.x"}}))
 
     frontend = STAGE / "frontend"
@@ -43,12 +46,11 @@ def main():
     config = {
         "$schema": "https://openapi.vercel.sh/vercel.json",
         "framework": "fastapi",
-        "rewrites": [{"source": "/", "destination": "/index.html"}],
-        "buildCommand": "npm --prefix frontend ci --include=dev && npm --prefix frontend run build -- --outDir ../public && python -m zipfile -e processed-data.zip .",
+        "buildCommand": "npm --prefix frontend ci --include=dev && npm --prefix frontend run build && python -m zipfile -e processed-data.zip .",
         "functions": {
             "main.py": {
-                "includeFiles": "data/**",
-                "excludeFiles": "{frontend/**,public/**,processed-data.zip}",
+                "includeFiles": "{data/**,frontend/dist/**}",
+                "excludeFiles": "{frontend/node_modules/**,processed-data.zip}",
             },
         },
     }

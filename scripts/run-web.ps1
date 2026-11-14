@@ -1,5 +1,8 @@
 param([int]$Port = 8001)
 $ErrorActionPreference = 'Stop'
+if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
+    throw "Port $Port is already in use. Choose another port with -Port 8002."
+}
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     Push-Location frontend
