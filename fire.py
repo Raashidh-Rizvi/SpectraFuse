@@ -18,6 +18,7 @@ from urllib3.util.retry import Retry
 
 ROOT = Path(__file__).resolve().parent
 SOURCES = ("MODIS_SP", "VIIRS_SNPP_SP")
+PRODUCTS = (*SOURCES, "VIIRS_NOAA20_SP")
 COLUMNS = ["latitude", "longitude", "acq_date", "acq_time", "satellite",
            "confidence", "frp", "daynight"]
 API = "https://firms.modaps.eosdis.nasa.gov/api"
@@ -247,7 +248,7 @@ def main():
         if name == "sync":
             command.add_argument("--start", required=True, type=date.fromisoformat)
             command.add_argument("--end", required=True, type=date.fromisoformat)
-            command.add_argument("--source", choices=SOURCES, action="append")
+            command.add_argument("--source", choices=PRODUCTS, action="append")
     args = parser.parse_args()
     try:
         area = "demo" if args.command == "demo" or args.area == "demo" and args.command == "build" else area_value(args.area)
@@ -269,5 +270,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

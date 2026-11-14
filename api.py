@@ -1,12 +1,14 @@
+import calendar as cal
 from datetime import date
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from analytics import evaluate_overlap, historical_anomalies
-from fire import SOURCES, area_value, monthly, workspace
+from fire import ROOT, PRODUCTS, SOURCES, area_value, monthly, workspace
 
 app = FastAPI(title="FireScope API")
 PILOT = "79.5,5.8,82,10"
@@ -62,7 +64,7 @@ def comparison(region: str = "sri-lanka"):
 @app.get("/api/fire/hotspots")
 def hotspots(day: date, region: str = "sri-lanka", source: str = SOURCES[0],
              limit: int = Query(1000, ge=1, le=10000), offset: int = Query(0, ge=0)):
-    if source not in SOURCES:
+    if source not in PRODUCTS:
         raise HTTPException(422, "Unknown sensor product.")
     path = workspace(resolve(region)) / "processed" / source / f"{day}.parquet"
     if not path.exists():
@@ -92,6 +94,54 @@ def area_analysis(request: Extent):
 
 
 @app.get("/api/fire/download")
-def download(region: str = "sri-lanka"):
-    return Response(calendar_table(region).to_csv(), media_type="text/csv",
+def download(region: str = "sri-lanka", year: int | None = None):
+    frame = dashboard_frame(region)
+    if year is not None:
+        frame = frame[frame.index.str.startswith(f"{year:04}-")]
+    return Response(frame.to_csv(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=firescope-monthly.csv"})
+
+
+def dashboard_frame(region):
+    import pyarrow.parquet as pq
+
+    frame = calendar_table(region)
+    source = PRODUCTS[-1]
+    files = (workspace(resolve(region)) / "processed" / source).glob("*.parquet")
+    totals = {}
+    for path in files:
+        month = path.stem[:7]
+        days, count = totals.get(month, (0, 0))
+        totals[month] = days + 1, count + pq.ParquetFile(path).metadata.num_rows
+    frame[source] = pd.Series({month: count for month, (days, count) in totals.items()
+                               if days == cal.monthrange(*map(int, month.split("-")))[1]}, dtype=float)
+    for name in (*PRODUCTS, "harmonized"):
+        frame[name + "_anomaly"] = historical_anomalies(frame[name])["Departure (%)"]
+    return frame
+
+
+@app.get("/api/fire/dashboard")
+def dashboard(region: str = "sri-lanka"):
+    return records(dashboard_frame(region).reset_index())
+
+
+@app.get("/api/fire/monthly-hotspots")
+def monthly_hotspots(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+                     source: str = SOURCES[1], region: str = "sri-lanka", csv: bool = False):
+    if source not in PRODUCTS or month.startswith("0000"):
+        raise HTTPException(422, "Use a valid month and sensor product.")
+    path = workspace(resolve(region)) / "processed" / source
+    files = sorted(path.glob(f"{month}-*.parquet"))
+    columns = ["latitude", "longitude", "acq_date", "satellite", "confidence", "frp", "acquired_utc"]
+    points = pd.concat((pd.read_parquet(file, columns=columns) for file in files), ignore_index=True) if files else pd.DataFrame(columns=columns)
+    if csv:
+        return Response(points.to_csv(index=False), media_type="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename={source}-{month}.csv"})
+    cells = points[["latitude", "longitude"]].round(2).groupby(["latitude", "longitude"]).size().rename("count").reset_index()
+    return {"total": len(points), "days": len(files),
+            "expected_days": cal.monthrange(*map(int, month.split("-")))[1], "cells": records(cells)}
+
+
+frontend = ROOT / "frontend" / "dist"
+if (frontend / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=frontend, html=True), name="frontend")

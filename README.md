@@ -76,3 +76,25 @@ powershell -ExecutionPolicy Bypass -File scripts/sri-lanka-pilot.ps1
 ```
 
 To export an interim report while downloading, add --partial to the pilot report command. The report is saved separately under pilot-partial.
+
+## React web application
+
+Install Python 3.13 and Node.js 22.12 or newer. From the project directory in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
+powershell -ExecutionPolicy Bypass -File scripts/sri-lanka-pilot.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-web.ps1
+```
+
+Open http://127.0.0.1:8001 for the React dashboard and http://127.0.0.1:8001/docs for FastAPI. The launch script builds React and serves it with FastAPI on the same local address. The browser never needs the FIRMS key. The Leaflet basemap requires an internet connection.
+
+Choose a year and sensor basis, then select a calendar cell to inspect the three sensor totals and update the map. The anomaly view compares the selected series with prior observations for that calendar month. Monthly and detection CSVs are available from the dashboard. NOAA-20 is shown as a separate comparison product and does not enter the existing S-NPP calibration. Only complete NOAA-20 months enter the calendar.
+
+Download additional NOAA-20 observations for the same extent:
+
+```powershell
+.\.venv\Scripts\python.exe fire.py sync --source VIIRS_NOAA20_SP --area '79.5,5.8,82,10' --start 2018-04-01 --end 2023-12-31
+```
+
+The dashboard sees newly completed NOAA-20 partitions on refresh. Re-run the command after the FIRMS quota replenishes to resume from completed days. For development, run the FastAPI server on port 8000 and run npm ci followed by npm run dev from the frontend folder.
