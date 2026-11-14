@@ -1,0 +1,4 @@
+latitude,longitude,acq_date,acq_time,satellite,confidence,frp,daynight
+7.0,80.0,2019-09-04,0345,Terra,85,12,D
+7.05,80.05,2019-09-04,0345,Terra,85,12,D
+7.1,80.1,2019-09-04,0345,Terra,85,12,D

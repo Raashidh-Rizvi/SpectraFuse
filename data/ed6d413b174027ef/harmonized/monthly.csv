@@ -1,0 +1,13 @@
+month,MODIS_SP,VIIRS_SNPP_SP,harmonized,origin
+2023-01,184,620,620.0,Observed by VIIRS
+2023-02,125,705,705.0,Observed by VIIRS
+2023-03,105,759,759.0,Observed by VIIRS
+2023-04,73,457,457.0,Observed by VIIRS
+2023-05,22,160,160.0,Observed by VIIRS
+2023-06,7,32,32.0,Observed by VIIRS
+2023-07,5,18,18.0,Observed by VIIRS
+2023-08,9,27,27.0,Observed by VIIRS
+2023-09,3,11,11.0,Observed by VIIRS
+2023-10,11,22,22.0,Observed by VIIRS
+2023-11,13,84,84.0,Observed by VIIRS
+2023-12,47,242,242.0,Observed by VIIRS

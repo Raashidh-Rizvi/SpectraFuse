@@ -1,0 +1,2 @@
+latitude,longitude,brightness,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_t31,frp,daynight,type
+7.2728,81.7078,308.2,1.5,1.2,2015-09-14,1642,Terra,MODIS,74,6.03,293.4,11.5,N,0
