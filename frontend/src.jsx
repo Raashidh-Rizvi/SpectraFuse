@@ -31,11 +31,11 @@ const primaryLayers = [modis, viirs, 'harmonized'];
 const comparisonLayers = [...primaryLayers, noaa];
 const defaultExtent = '79.5,5.8,82,10';
 
-function DetectionMap({layers, enabled, loading, extent, vertices, drawing, onVertex}) {
+function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex}) {
   const element = useRef(null);
   const map = useRef(null);
   useEffect(() => {
-    const view = L.map(element.current, {scrollWheelZoom:false}).setView([7.8,80.7],7);
+    const view = L.map(element.current, {scrollWheelZoom:true}).setView([7.8,80.7],7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution:'Â© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(view);
@@ -71,6 +71,16 @@ function DetectionMap({layers, enabled, loading, extent, vertices, drawing, onVe
     else if (extent === 'world') map.current.setView([0,0],2);
   }, [extent]);
   useEffect(() => {
+    if (!place) return;
+    const position = [place.lat, place.lon];
+    map.current.setView(position, 12);
+    const label = document.createElement('span');
+    label.textContent = place.label;
+    const marker = L.circleMarker(position, {radius:7, color:'#18386f', fillColor:'#fff', fillOpacity:1})
+      .addTo(map.current).bindTooltip(label, {permanent:true});
+    return () => marker.remove();
+  }, [place]);
+  useEffect(() => {
     if (!drawing) return;
     const add = event => onVertex([event.latlng.lng, event.latlng.lat]);
     map.current.on('click', add);
@@ -82,6 +92,51 @@ function DetectionMap({layers, enabled, loading, extent, vertices, drawing, onVe
   }, [vertices]);
   return <div className="mapwrap"><div ref={element} className="map" aria-label="Map of recorded fire detections"/>
     {loading && <span className="mapstatus">Loading detectionsâ€¦</span>}</div>;
+}
+
+function PlaceSearch({onSelect}) {
+  const [results, setResults] = useState([]);
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(false);
+  return <div className="place-search">
+    <form onSubmit={async event => {
+      event.preventDefault();
+      const q = new FormData(event.currentTarget).get('place').trim();
+      if (!q || loading) return;
+      setResults([]);
+      setStatus('');
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({q,limit:'5'});
+        const response = await fetch('https://photon.komoot.io/api/?'+params, {
+          signal:AbortSignal.timeout(10000)
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        const places = data.features.flatMap(({geometry, properties}) => {
+          const [lon,lat] = geometry.coordinates;
+          const label = [...new Set([properties.name, properties.city, properties.state,
+            properties.country].filter(Boolean))].join(', ');
+          return Number.isFinite(lat) && Number.isFinite(lon) && label ? [{lat,lon,label}] : [];
+        });
+        setResults(places);
+        if (!places.length) setStatus('No matching places found.');
+      } catch {
+        setStatus('Place search is temporarily unavailable.');
+      } finally {
+        setLoading(false);
+      }
+    }}>
+      <input name="place" type="search" aria-label="Search by place name" placeholder="Search by place name" required maxLength={120}/>
+      <button type="submit" className="button" disabled={loading}>Search</button>
+    </form>
+    {(loading || status) && <small role="status">{loading ? 'Searching…' : status}</small>}
+    {results.length > 0 && <ul aria-label="Search results">{results.map((place,index)=>
+      <li key={index}><button type="button" className="button" onClick={()=>{
+        onSelect(place);
+        setResults([]);
+      }}>{place.label}</button></li>)}</ul>}
+  </div>;
 }
 
 function App() {
@@ -110,6 +165,8 @@ function App() {
   const [polygon,setPolygon] = useState('');
   const polygonQuery = polygon ? '&polygon='+encodeURIComponent(polygon) : '';
   const [selected,setSelected] = useState(''), [sensor,setSensor] = useState(viirs);
+  const [place, setPlace] = useState(null);
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
   useEffect(() => {
     if (!mapExpanded) return;
@@ -126,6 +183,7 @@ function App() {
   }, [mapExpanded]);
   const [enabled,setEnabled] = useState(primaryLayers);
   const [filter,setFilter] = useState(null);
+  const [filterError,setFilterError] = useState('');
   const extent = regionInfo?.area ?? defaultExtent;
   const monthEnd = selected ? new Date(Date.UTC(+selected.slice(0,4),+selected.slice(5),0)).getUTCDate() : '';
   const defaults = {start:selected+'-01',end:selected+'-'+monthEnd,bbox:extent};
@@ -134,11 +192,11 @@ function App() {
   const mapPath = '/map-layers?'+query+polygonQuery+'&'+new URLSearchParams({
     start:activeFilter.start,end:activeFilter.end,bbox:activeFilter.bbox
   });
-  const map = mapResult?.path === mapPath ? mapResult.data : null;
+  const map = mapResult?.region === region ? mapResult.data : null;
   const [percent,setPercent] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    setPolygon(''); setVertices([]); setDrawing(false); setError(''); setRows([]); setSelected(''); setYear('all');
+    setPolygon(''); setVertices([]); setDrawing(false); setFilterError(''); setError(''); setRows([]); setSelected(''); setYear('all'); setPeriod({start:'',end:''}); setPeriodError('');
     Promise.all([get('/dashboard?'+query,controller.signal),get('/sensor-comparison?'+query,controller.signal)])
       .then(([data,comparison]) => {
         setRows(data); setMetrics(comparison.metrics);
@@ -149,15 +207,25 @@ function App() {
   useEffect(() => {
     if (!selected) return;
     const controller = new AbortController();
-    setMap(null); setMapError('');
+    setMapError('');
     get(mapPath,controller.signal).then(data => {
-      if (!controller.signal.aborted) setMap({path:mapPath,data});
+      if (!controller.signal.aborted) setMap({path:mapPath,region,data});
     })
       .catch(err => {if (!controller.signal.aborted) setMapError(err.message);});
     return () => controller.abort();
   }, [selected,mapPath]);
+  const [period,setPeriod] = useState({start:'',end:''});
+  const [compareTrends,setCompareTrends] = useState(false);
+  const [periodError,setPeriodError] = useState('');
   const years = [...new Set(rows.map(row => row.month.slice(0,4)))];
-  const visible = rows.filter(row => year === 'all' || row.month.startsWith(year));
+  const visible = rows.filter(row => (year === 'all' || row.month.startsWith(year))
+    && (!period.start || row.month >= period.start)
+    && (!period.end || row.month <= period.end));
+  useEffect(() => {
+    if (visible.length && !visible.some(row => row.month === selected)) {
+      setSelected(visible.at(-1).month);
+    }
+  }, [rows,year,period,selected]);
   const active = visible.filter(row => row[measure] != null);
   const selectedRow = rows.find(row => row.month === selected);
   const total = active.reduce((sum,row) => sum + row[measure],0);
@@ -179,6 +247,28 @@ function App() {
       {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
       <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
     </section>
+    {!!rows.length && <form className="map-filters" key={region+period.start+period.end} onSubmit={event=>{
+      event.preventDefault();
+      const values = new FormData(event.currentTarget);
+      const start = values.get('start'), end = values.get('end');
+      if (start && end && start > end) {
+        setPeriodError('End month must be on or after start month.');
+        return;
+      }
+      setPeriodError('');
+      setYear('all');
+      setPeriod({start,end});
+    }}>
+      <label>Start month<input type="month" name="start" defaultValue={period.start}/></label>
+      <label>End month<input type="month" name="end" defaultValue={period.end}/></label>
+      <button className="button" type="submit">Apply activity period</button>
+      {(period.start || period.end) && <button className="button" type="button" onClick={()=>{
+        setPeriodError('');
+        setPeriod({start:'',end:''});
+      }}>Clear activity period</button>}
+      {periodError && <small role="alert">{periodError}</small>}
+    </form>}
+    {!!rows.length && !visible.length && <p role="status">No monthly activity in the selected period.</p>}
     {error && <p role="alert" className="panel notice">{error}</p>}
     {!error && !rows.length && <p role="status" className="panel notice">Loading NASA FIRMS observationsâ€¦</p>}
     {!!rows.length && <div className="dashboard">
@@ -186,12 +276,14 @@ function App() {
       <section className="panel stat"><span><Flame size={17}/> {names[measure]} detections</span><strong>{active.length ? format(total) : 'â€”'}</strong><small>Sum across selected months</small></section>
       <section className="panel stat dark"><span><Activity size={17}/> Peak activity</span><strong>{peak?.month ?? 'â€”'}</strong><small>{format(peak?.[measure])} detections</small></section>
       <section className="panel stat"><span><Orbit size={17}/> NOAA-20 coverage</span><strong>{noaaMonths}<em> / {rows.length}</em></strong><small>Complete months across the pilot</small></section>
-      <section className="panel trend"><h2>Historical activity</h2><p>Monthly counts and VIIRS-scale activity</p>
+      <section className="panel trend"><h2>Historical activity</h2><p>{compareTrends ? 'Monthly counts and VIIRS-scale activity' : names[measure]+' monthly activity'}</p>
+        <label className="toggle"><input type="checkbox" checked={compareTrends}
+          onChange={event=>setCompareTrends(event.target.checked)}/> Compare sensor trends</label>
         <div className="chart"><ResponsiveContainer><AreaChart data={chart} margin={{left:1,right:13,top:10,bottom:0}}>
           <CartesianGrid vertical={false} stroke="#c5d1ff35"/><XAxis dataKey="month" tick={{fill:'var(--chart-label)',fontSize:11}} minTickGap={28}/><YAxis width={49} tick={{fill:'var(--chart-label)',fontSize:11}}/>
           <Tooltip contentStyle={{background:'#1b2450',border:'1px solid #8ba0dd',borderRadius:10}} formatter={(value,name)=>[format(value),name]}/>
           <Legend/>
-          {primaryLayers.map(key=><Area key={key} type="linear" dataKey={key} name={names[key]}
+          {(compareTrends ? primaryLayers : [measure]).map(key=><Area key={key} type="linear" dataKey={key} name={names[key]}
             stroke={sensorColors[key].fill} strokeWidth={2} strokeDasharray={key==='harmonized'?'5 3':undefined} fill="none"/>)}
         </AreaChart></ResponsiveContainer></div>
       </section>
@@ -201,9 +293,9 @@ function App() {
         </Bar>
         </BarChart></ResponsiveContainer></div>{selectedRow?.estimate_low != null && <p>Estimated from MODIS · empirical error range {format(selectedRow.estimate_low)}–{format(selectedRow.estimate_high)}</p>}
         <small>Held-out monthly MAE: {format(errorMetric?.MAE)} detections</small></section>
-      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
+      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
         <div className="calendar-scroll"><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
-          {years.filter(value=>year==='all'||year===value).map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
+          {[...new Set(visible.map(row=>row.month.slice(0,4)))].map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
             const key=value+'-'+String(index+1).padStart(2,'0');
             const item=visible.find(row=>row.month===key);
             const n=percent?item?.[anomalyKey]:item?.[measure];
@@ -216,8 +308,15 @@ function App() {
         </tbody></table></div>
         <small>{percent?'Percent departure from the median of at least two prior values for the same month. A zero median leaves the percentage blank.':'Counts of satellite detections. A dash indicates unavailable data.'}</small>
       </section>
-      <section className={mapExpanded ? "panel geo geo-expanded" : "panel geo"}><div className="sectionhead"><div><h2>Detection map</h2>
-        <p>{selected || 'Select a month'} · {map?.provenance ?? 'NASA FIRMS Standard Processing'}</p></div>
+      <section className={mapExpanded ? "panel geo geo-expanded" : "panel geo"}>
+        <div className="map-controls">
+          {mapExpanded && <button type="button" className="button" aria-expanded={!controlsCollapsed}
+            aria-controls="detection-map-controls" onClick={() => setControlsCollapsed(value => !value)}>
+            {controlsCollapsed ? 'Show map controls' : 'Hide map controls'}
+          </button>}
+          <div id="detection-map-controls" hidden={mapExpanded && controlsCollapsed}>
+          <div className="sectionhead"><div><h2>Detection map</h2>
+        <p>{activeFilter.start} to {activeFilter.end} · {map?.provenance ?? 'NASA FIRMS Standard Processing'}</p></div>
         <label><span>Map product</span><select value={sensor} onChange={e=>{
           setSensor(e.target.value);
           setEnabled(previous=>[...new Set([...previous,e.target.value])]);
@@ -227,12 +326,37 @@ function App() {
           {mapExpanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}
           {mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
         </button>
+        <PlaceSearch onSelect={setPlace}/>
         <form className="map-filters" key={region+selected+extent} onSubmit={event=>{
           event.preventDefault();
           const values = new FormData(event.currentTarget);
-          setFilter({region,month:selected,start:values.get('start'),end:values.get('end'),bbox:values.get('bbox').trim()});
-        }}>
-          <label>Start date (UTC)<input name="start" type="date" required defaultValue={activeFilter.start}/></label>
+          const start = values.get('start'), end = values.get('end');
+          const bbox = values.get('bbox').trim();
+          const days = (Date.parse(end) - Date.parse(start)) / 86400000 + 1;
+          const bounds = bbox.split(',').map(value => value.trim() ? Number(value) : NaN);
+          const [w,s,e,n] = bounds;
+          const [rw,rs,re,rn] = (extent === 'world' ? '-180,-90,180,90' : extent).split(',').map(Number);
+          if (days < 1 || days > 31) {
+            setFilterError('Choose an end date on or after the start date, within 31 days.');
+            return;
+          }
+          if (bbox !== 'world' || extent !== 'world') {
+            if (bounds.length !== 4 || !(rw <= w && w < e && e <= re && rs <= s && s < n && n <= rn)) {
+              setFilterError('Enter west,south,east,north within the downloaded region.');
+              return;
+            }
+          }
+          setFilterError('');
+          setFilter({region,month:selected,start,end,bbox});
+        }} onChange={()=>setFilterError('')}>
+          <label>Start date (UTC)<input name="start" type="date" required defaultValue={activeFilter.start}
+            onChange={event=>{
+              const start = event.target.value;
+              const end = event.target.form.elements.namedItem('end');
+              if (start && (end.value < start || Date.parse(end.value) - Date.parse(start) >= 31 * 86400000)) {
+                end.value = start;
+              }
+            }}/></label>
           <label>End date (UTC)<input name="end" type="date" required defaultValue={activeFilter.end}/></label>
           <label>Bounding box<input name="bbox" required defaultValue={activeFilter.bbox}
             aria-label="Bounding box west,south,east,north"/></label>
@@ -264,10 +388,7 @@ function App() {
             </label>;
           })}
         </div>
-        <DetectionMap layers={map?.layers} enabled={enabled} vertices={vertices} drawing={drawing}
-          onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
-          extent={activeFilter.bbox} loading={!!selected&&!map&&!mapError}/>
-        {mapError && <small role="alert">{mapError}</small>}
+        {(filterError || mapError) && <small role="alert">{filterError || mapError}</small>}
         {map?.layers.harmonized.factor != null && <small>
           MODIS counts scaled by {format(map.layers.harmonized.factor)}. Regional monthly holdout
           90th-percentile absolute error: {format(map.layers.harmonized.monthly_error_p90)} detections.
@@ -277,6 +398,11 @@ function App() {
           Harmonized cells contain observed S-NPP counts. Partition coverage cannot establish satellite coverage.
         </small>}
         {selected && sensor !== 'harmonized' && <small><a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download calendar-month detections</a></small>}
+          </div>
+        </div>
+        <DetectionMap layers={map?.layers} enabled={enabled} vertices={vertices} drawing={drawing}
+          onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
+          extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}/>
       </section>
     </div>}
     <footer>NASA FIRMS observations Â· Hotspots can include repeated detections and non-fire thermal sources.</footer>
