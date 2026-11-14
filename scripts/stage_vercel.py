@@ -17,7 +17,8 @@ def main():
         sys.exit("Build or restore the Sri Lanka dataset before staging the deployment.")
 
     STAGE.mkdir(exist_ok=True)
-    for name in ("main.py", "analytics.py", "fire.py"):
+    (STAGE / "backend").mkdir(exist_ok=True)
+    for name in ("backend/__init__.py", "backend/main.py", "analytics.py", "fire.py"):
         shutil.copyfile(ROOT / name, STAGE / name)
 
     requirements = (ROOT / "requirements.txt").read_text().splitlines()
@@ -26,7 +27,7 @@ def main():
     (STAGE / ".python-version").write_text("3.13\n")
     (STAGE / "pyproject.toml").write_text(
         '[project]\nname = "firescope"\nversion = "0.1.0"\nrequires-python = "==3.13.*"\n'
-        f'dependencies = {json.dumps(runtime)}\n\n[tool.vercel]\nentrypoint = "main:app"\n'
+        f'dependencies = {json.dumps(runtime)}\n\n[tool.vercel]\nentrypoint = "backend.main:app"\n'
     )
     (STAGE / "package.json").write_text(json.dumps({"private": True, "engines": {"node": "22.x"}}))
 
@@ -48,7 +49,7 @@ def main():
         "framework": "fastapi",
         "buildCommand": "npm --prefix frontend ci --include=dev && npm --prefix frontend run build && python -m zipfile -e processed-data.zip .",
         "functions": {
-            "main.py": {
+            "backend/main.py": {
                 "includeFiles": "{data/**,frontend/dist/**}",
                 "excludeFiles": "{frontend/node_modules/**,processed-data.zip}",
             },

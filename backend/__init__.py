@@ -1,0 +1,1 @@
+"""FireScope FastAPI backend."""

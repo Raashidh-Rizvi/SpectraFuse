@@ -55,7 +55,7 @@ API requests fetch up to five consecutive dates at a time. The response is split
 Run the API in a second PowerShell window from the project folder:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 Interactive API documentation is available at http://127.0.0.1:8000/docs. The seven fire endpoints use the existing Parquet store. Use region=sri-lanka for the pilot and region=demo for synthetic data. Hotspots accept a UTC day and product code. Area analysis accepts a bounding box within the downloaded extent.

@@ -1,3 +1,3 @@
 """Compatibility imports for existing FireScope commands."""
 
-from main import app, dashboard_frame
+from backend.main import app, dashboard_frame
