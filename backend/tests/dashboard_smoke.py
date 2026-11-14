@@ -3,7 +3,7 @@ from pathlib import Path
 from streamlit.testing.v1 import AppTest
 
 root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root))
+sys.path.insert(0, str(root.parent))
 app = AppTest.from_file(str(root / 'app.py'), default_timeout=60).run()
 assert not app.exception, [item.message for item in app.exception]
 assert len(app.get("plotly_chart")) == 4
