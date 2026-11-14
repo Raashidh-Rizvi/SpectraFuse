@@ -125,3 +125,16 @@ To resume the complete Sri Lanka Standard Processing backfill, run scripts/histo
 ## Record the demo
 
 With the web app running and the frontend dependencies installed, run node scripts/record-demo.mjs from the project root. The script uses Microsoft Edge and produces data/demo-recording/firescope-demo.webm. Set FIRESCOPE_TEST_URL to the local server address if it differs from http://127.0.0.1:8003.
+
+## Deploy to Vercel
+
+From the repository root, run:
+
+```powershell
+python scripts/stage_vercel.py
+npx vercel@latest deploy .vercel-stage
+```
+
+Sign in when prompted and use the generated folder as a standalone Vercel project. Open the preview URL and check that the Sri Lanka dashboard and hotspot map load. Publish with `npx vercel@latest deploy .vercel-stage --prod` when the preview is ready.
+
+The staged deployment includes processed Parquet data and monthly summaries from the local dashboard regions. It requires an existing Sri Lanka dataset. It does not include the local .env or raw FIRMS downloads. The deployed dashboard serves a read-only snapshot and does not require a FIRMS key. To refresh it, sync the data locally, rerun the staging command, and redeploy. Use the CLI from this checkout because the datasets are ignored by Git.
