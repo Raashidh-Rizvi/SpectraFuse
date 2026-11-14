@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "fastapi",
-  "buildCommand": "npm --prefix frontend ci --include=dev && npm --prefix frontend run build"
+  "buildCommand": "npm --prefix frontend ci --include=dev && npm --prefix frontend run build",
+  "functions": {
+    "backend/main.py": {
+      "includeFiles": "{data/*/area.txt,data/*/harmonized/monthly.parquet,data/*/processed/**/*.parquet,frontend/dist/**}",
+      "excludeFiles": "{.vercel-stage/**,frontend/node_modules/**,frontend/tests/**,backend/tests/**,backend/scripts/**,notebooks/**,data/*/raw/**,data/demo/**,data/demo-recording/**,data/sri-lanka-2000-2025/**}"
+    }
+  }
 }
