@@ -9,6 +9,8 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/test-results/
+test-results/
+.vscode/
 frontend/playwright-report/
 /.vercel-stage/
 

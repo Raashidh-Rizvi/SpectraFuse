@@ -86,10 +86,51 @@ React and Leaflet provide the main dashboard. FastAPI serves the prepared data a
 
 Use `region=sri-lanka` for the pilot or the region ID returned by `/regions`. The local synthetic archive also accepts `region=demo`. The server locates data through `FIRESCOPE_DATA_DIR` or defaults to the project data folder. The FIRMS key belongs in the local sync environment. The browser and read-only deployment use prepared files.
 
+## AI assistant and chat API
+
+The assistant answers from the same Parquet archive as the dashboard. A deterministic router and guardrail run first. Greetings, thanks, help, farewells and acknowledgments get fixed replies with no data query and no model call. Injection, jailbreak, credential and SQL-style probes are refused before any tool runs. Everything else goes to the orchestrator, which delegates to one specialist agent. The validation agent then checks the draft against the evidence, scans for secrets and file paths, and appends the standing limitation.
+
+| Agent | Responsibility |
+| --- | --- |
+| Orchestrator | Classifies intent, extracts region, year, month, dates and bounding box, and delegates. |
+| Data query | Monthly counts with observed, estimated or unavailable provenance, and ranked peak months. |
+| Analysis | Sensor comparison over matched months, seasonal departure, calibration factor and holdout error. |
+| Map | Validates dates (1 to 31 inclusive UTC days) and bounds, then emits a `show_on_map` action. |
+| Explanation | Methodology answers drawn from a fixed knowledge base built from the project documents. |
+| Export | Builds a download URL for the exact slice the user asked about. |
+| Validation | Verifies numerical grounding, estimated versus observed wording, and secret leakage. |
+
+All paths below share the prefix `/api/fire`.
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /chat` | Ask a question. Body fields: `message` (up to 4,000 characters), optional `session_id`, `region`, `context` and `history`. |
+| `GET /chat/health` | Active provider, fallback status, live session count and memory window. |
+| `GET /chat/capabilities` | Supported intents, deterministic tools and memory settings. |
+| `DELETE /chat/session/{session_id}` | Delete one session's memory. |
+
+A chat response contains `request_id`, `session_id`, `intent`, `answer`, `region`, `period`, `evidence`, `calculations`, `limitations`, `ui_actions` and `downloads`. Each evidence item records its source, sensor product, metric, exact value, status, coverage and whether the regional multiplier was applied. Calculation steps give the formula and result. A `show_on_map` action carries the region, UTC date range and optional bounding box that the dashboard applies to the Leaflet map.
+
+### Session memory
+
+Each session keeps the last four question and answer pairs (eight turns), the active region, year, month and period, and the last detections. A follow-up such as *"explain that"* or *"show it on the map"* resolves against this window. Conversational pleasantries are recorded but never overwrite the scientific context, so *"thank you"* followed by *"show that on the map"* still targets the earlier data. Sessions expire after 7,200 seconds of inactivity and the store holds at most 5,000 sessions, evicting the least recently used. The store is in process memory. Run a single worker, or move the store to shared storage, before scaling out. See the hosting guide for the options.
+
+### Providers
+
+`LLM_PROVIDER` selects `groq`, `gemini` or `openai`, each with its own `*_API_KEY` and `*_MODEL`. Calls use HTTPS with a 15 second timeout and two retries on 429 and 5xx responses. A failure after the retries falls back to the offline provider. `USE_MOCK_MODEL=true` forces offline mode. The health endpoint reports the active provider as, for example, `gemini (fallback: mock)`.
+
+### Evaluation
+
+`backend/tests/evaluation_dataset.json` holds 22 benchmark questions, EV-01 to EV-22. `backend/tests/test_evaluation_runner.py` checks the classified intent, required text, forbidden text, evidence count and status, calculation steps, UI actions, downloads and the mandatory limitation for each one. The set covers monthly summaries, sensor comparison, peak months, seasonal anomalies, map requests, provenance, calibration, export, methodology, out-of-archive months, date and bounds validation, greetings, and refusal of prompt injection, credential probes and SQL injection.
+
 ## Maintenance and verification
 
 | Task | Entry point or check |
 | --- | --- |
+| Run every backend test, including the evaluation benchmark | `python -m pytest backend/tests -q` |
+| Type-check the backend | `pyrefly check backend --min-severity=warn` |
+| Check the chat panel in a browser | `npx playwright test tests/chat.spec.js` from `frontend`, with `FIRESCOPE_TEST_URL` set to the running app |
+| Check chat health after a deployment | `GET /api/fire/chat/health` should report `healthy` and the expected provider |
 | Resume historical downloads | `backend/scripts/history.ps1`. Check completed date partitions and rerun sync after quota recovery. |
 | Generate the pilot report | `backend/scripts/pilot_report.py`. Use `--partial` for a separate interim report while syncing. |
 | Compare NOAA-20 against the Sri Lanka holdout | `backend/scripts/noaa20_validation.py` |

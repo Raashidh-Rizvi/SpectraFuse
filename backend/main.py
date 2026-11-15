@@ -1,7 +1,9 @@
 import calendar as cal
 from datetime import date
+from typing import Any, cast
 
 import pandas as pd
+import pyarrow.parquet as pq
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +11,7 @@ from pydantic import BaseModel
 
 from backend.analytics import evaluate_overlap, historical_anomalies
 from backend.chat import ChatRequest, answer, evidence
+from backend.agents.schemas import ChatRequest as AgentChatRequest
 from backend.fire import (ROOT, PRODUCTS, SOURCES, area_value, calibration_factor,
                           calibration_split, data_directory, monthly, workspace)
 
@@ -107,8 +110,6 @@ def download(region: str = "sri-lanka", year: int | None = None):
 
 
 def dashboard_frame(region):
-    import pyarrow.parquet as pq
-
     frame = calendar_table(region)
     source = PRODUCTS[-1]
     files = (workspace(resolve(region)) / "processed" / source).glob("*.parquet")
@@ -123,7 +124,7 @@ def dashboard_frame(region):
         frame[name + "_anomaly"] = historical_anomalies(frame[name])["Departure (%)"]
     heldout, metrics = evaluate_overlap(frame)
     if not metrics.empty:
-        radius = metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"]
+        radius = float(cast(Any, metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"]))
         estimated = frame.harmonized.where(frame.origin.eq("Estimated from MODIS"))
         frame["estimate_low"] = (estimated - radius).clip(lower=0)
         frame["estimate_high"] = estimated + radius
@@ -209,8 +210,8 @@ def map_layers(start: date, end: date, region: str = "sri-lanka",
                           "features": records(locations)}
 
     modis, viirs = SOURCES
-    grid = {"features": [], "total": None, "source": None, "days": 0, "status": "Unavailable",
-            "factor": None, "monthly_error_p90": None}
+    grid: dict[str, Any] = {"features": [], "total": None, "source": None, "days": 0, "status": "Unavailable",
+                            "factor": None, "monthly_error_p90": None}
     source, scale = viirs, 1
     if layers[viirs]["days"] != expected:
         source = modis
@@ -220,7 +221,7 @@ def map_layers(start: date, end: date, region: str = "sri-lanka",
             if scale is not None:
                 _, metrics = evaluate_overlap(table)
                 grid["monthly_error_p90"] = float(
-                    metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"])
+                    cast(Any, metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"]))
         else:
             scale = None
     if scale is not None:
@@ -252,14 +253,92 @@ def regions():
 
 
 @app.post("/api/fire/chat")
-def chat(request: ChatRequest):
-    frame = dashboard_frame(request.region)
-    if frame.empty:
-        raise HTTPException(404, "This dataset has no monthly records.")
-    _, metrics = evaluate_overlap(frame)
-    data = evidence(frame, metrics, request.region)
-    return {"answer": answer(request, data), "source": data["source"],
-            "first_month": frame.index.min(), "last_month": frame.index.max()}
+def chat(request: AgentChatRequest):
+    # Support legacy test call signature if passed directly
+    if type(request).__name__ == "ChatRequest" and type(request).__module__ == "backend.chat":
+        frame = dashboard_frame(request.region)
+        if frame.empty:
+            raise HTTPException(404, "This dataset has no monthly records.")
+        _, metrics = evaluate_overlap(frame)
+        data = evidence(frame, metrics, request.region)
+        return {"answer": answer(request, data), "source": data["source"],
+                "first_month": frame.index.min(), "last_month": frame.index.max()}
+
+    from backend.agents.service import get_agent_service
+    service = get_agent_service()
+    return service.process_chat(request)
+
+
+@app.get("/api/fire/chat/health")
+def chat_health():
+    from backend.agents.model_provider import FallbackModelProvider
+    from backend.agents.service import get_agent_service
+    service = get_agent_service()
+    provider = service.orchestrator.provider
+    if isinstance(provider, FallbackModelProvider):
+        primary_name = provider.primary.__class__.__name__.lower().replace("modelprovider", "")
+        fallback_name = provider.fallback.__class__.__name__.lower().replace("modelprovider", "")
+        provider_name = f"{primary_name} (fallback: {fallback_name})"
+    else:
+        provider_name = provider.__class__.__name__.lower().replace("modelprovider", "")
+    return {
+        "status": "healthy",
+        "provider": provider_name,
+        "active_sessions": service.session_store.active_session_count(),
+        "active_regions": ["sri-lanka", "demo", "101,14,102,15"],
+        "stm_max_pairs": 4,
+    }
+
+
+@app.get("/api/fire/chat/capabilities")
+def chat_capabilities():
+    return {
+        "supported_intents": [
+            "monthly_summary",
+            "trend_analysis",
+            "anomaly_explanation",
+            "sensor_comparison",
+            "calibration_explanation",
+            "hotspot_request",
+            "data_export",
+            "methodology_question",
+            "coverage_question",
+            "followup_explanation",
+            "greeting",
+            "gratitude",
+            "help",
+            "farewell",
+            "acknowledgment",
+            "unsupported_request",
+        ],
+        "deterministic_tools": [
+            "list_regions",
+            "get_monthly_activity",
+            "get_coverage_status",
+            "compare_sensors",
+            "get_seasonal_departure",
+            "get_calibration_summary",
+            "get_holdout_metrics",
+            "get_hotspot_detections",
+            "get_map_layers_action",
+            "generate_export_reference",
+        ],
+        "sensors": ["MODIS_SP", "VIIRS_SNPP_SP", "VIIRS_NOAA20_SP", "harmonized"],
+        "memory": {
+            "stm_max_pairs": 4,
+            "max_turns": 8,
+            "ttl_seconds": 7200,
+            "reference_resolution": True,
+        },
+    }
+
+
+@app.delete("/api/fire/chat/session/{session_id}")
+def clear_session(session_id: str):
+    from backend.agents.service import get_agent_service
+    service = get_agent_service()
+    deleted = service.session_store.delete(session_id)
+    return {"session_id": session_id, "deleted": deleted}
 
 
 frontend = ROOT / "frontend" / "dist"

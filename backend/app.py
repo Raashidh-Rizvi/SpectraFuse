@@ -1,5 +1,5 @@
 import pandas as pd
-import plotly.express as px
+import plotly.express as px  # type: ignore
 import streamlit as st
 
 from backend.analytics import evaluate_overlap, historical_anomalies
@@ -81,13 +81,15 @@ st.caption("Satellite detections can include repeat observations and non-fire th
 
 with st.expander("Monthly detection map"):
     selected_month = visible.index[-1]
-    if calendar_selection.selection.points:
-        point = calendar_selection.selection.points[0]
+    sel = getattr(calendar_selection, "selection", None)
+    if sel and getattr(sel, "points", None):
+        point = sel.points[0]
         labels = list(grid.columns)
         candidate = f"{point.get('y')}-{labels.index(point['x']) + 1:02}" if point.get("x") in labels else ""
         if candidate in visible.index:
             selected_month = candidate
-    map_month = st.selectbox("Map month", visible.index, index=visible.index.get_loc(selected_month),
+    loc = visible.index.get_loc(selected_month)
+    map_month = st.selectbox("Map month", visible.index, index=loc if isinstance(loc, int) else 0,
                              key=f"map-month-{selected_month}")
     st.dataframe(visible.loc[[map_month], [*SOURCES, "harmonized", "origin",
                                            "Historical median", "Departure (%)"]])

@@ -1,11 +1,13 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity, CalendarDays, Download, Flame, Layers, MapPin, Maximize2, Minimize2, Moon, Orbit, Sun} from 'lucide-react';
+import {Activity, Bot, CalendarDays, Download, Flame, Layers, MapPin, Maximize2, Minimize2, Moon, Orbit, Sun} from 'lucide-react';
 import {Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import DatasetChat from './DatasetChat';
+import {ChatProvider, useChat} from './context/ChatContext';
+import ChatPanel from './components/chat/ChatPanel';
 
 const base = (import.meta.env.VITE_API_BASE_URL || '/api/fire').replace(/\/+$/, '');
 const modis = 'MODIS_SP', viirs = 'VIIRS_SNPP_SP', noaa = 'VIIRS_NOAA20_SP';
@@ -32,7 +34,7 @@ const primaryLayers = [modis, viirs, 'harmonized'];
 const comparisonLayers = [...primaryLayers, noaa];
 const defaultExtent = '79.5,5.8,82,10';
 
-function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex}) {
+function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex, locateTrigger}) {
   const element = useRef(null);
   const map = useRef(null);
   useEffect(() => {
@@ -67,10 +69,15 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
     return () => group.remove();
   }, [layers,enabled]);
   useEffect(() => {
+    if (!map.current || !extent) return;
+    map.current.invalidateSize();
     const [w,s,e,n] = extent.split(",").map(Number);
-    if ([w,s,e,n].every(Number.isFinite) && w >= -180 && w < e && e <= 180 && s >= -90 && s < n && n <= 90) map.current.fitBounds([[s,w],[n,e]]);
-    else if (extent === 'world') map.current.setView([0,0],2);
-  }, [extent]);
+    if ([w,s,e,n].every(Number.isFinite) && w >= -180 && w < e && e <= 180 && s >= -90 && s < n && n <= 90) {
+      map.current.fitBounds([[s,w],[n,e]], { padding: [15, 15], maxZoom: 11, animate: true });
+    } else if (extent === 'world') {
+      map.current.setView([0,0],2);
+    }
+  }, [extent, locateTrigger]);
   useEffect(() => {
     if (!place) return;
     const position = [place.lat, place.lon];
@@ -138,6 +145,39 @@ function PlaceSearch({onSelect}) {
         setResults([]);
       }}>{place.label}</button></li>)}</ul>}
   </div>;
+}
+
+function AssistantHeaderButton() {
+  const { openChat, isOpen } = useChat();
+  return (
+    <button
+      className="button ai-assistant-header-btn"
+      type="button"
+      aria-label="Open AI Assistant"
+      aria-expanded={isOpen}
+      onClick={openChat}
+    >
+      <Bot size={16} />
+      <span>AI Assistant</span>
+    </button>
+  );
+}
+
+function AssistantFloatingPill() {
+  const { openChat, isOpen } = useChat();
+  if (isOpen) return null;
+  return (
+    <button
+      className="chat-floating-button"
+      type="button"
+      aria-label="Open Satellite Fire AI Assistant"
+      onClick={openChat}
+    >
+      <Flame size={18} />
+      <span>Ask AI Assistant</span>
+      <span className="pulse-dot" aria-hidden="true" />
+    </button>
+  );
 }
 
 function App() {
@@ -236,13 +276,82 @@ function App() {
   const maximum = Math.max(1,...visible.map(row => percent ? Math.abs(row[anomalyKey] ?? 0) : row[measure] ?? 0));
   const chart = visible;
   const errorMetric = metrics.find(row => row.Method === 'Calibrated MODIS');
-  return <main>
-    <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
-      <div className="header-actions"><button className="button theme-button" type="button"
-        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-        {theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}
-      </button><a className="button" href={base+'/download?'+query+(year==='all' ? '' : '&year='+year)}><Download size={16}/> Monthly CSV</a></div></header>
+  const [locateTrigger, setLocateTrigger] = useState(0);
+
+  const handleDispatchAction = useCallback((action) => {
+    if (!action || !action.type) return;
+    const payload = action.payload || {};
+
+    if (action.type === 'show_on_map') {
+      const targetRegion = payload.region || region;
+      const targetBbox = payload.bbox || (regionInfo?.area ?? defaultExtent);
+
+      if (payload.region && payload.region !== region) {
+        setRegion(payload.region);
+      }
+      if (payload.start && payload.end) {
+        const targetMonth = payload.start.slice(0, 7);
+        const targetYear = targetMonth.slice(0, 4);
+
+        // Ensure visible list includes this month so year filter doesn't overwrite selected
+        setYear(prev => (prev !== 'all' && prev !== targetYear ? 'all' : prev));
+        setPeriod({ start: '', end: '' });
+        setSelected(targetMonth);
+
+        setFilter({
+          region: targetRegion,
+          month: targetMonth,
+          start: payload.start,
+          end: payload.end,
+          bbox: targetBbox,
+        });
+      }
+      if (payload.layers && Array.isArray(payload.layers) && payload.layers.length > 0) {
+        setEnabled(previous => [...new Set([...previous, ...payload.layers])]);
+      }
+
+      // Re-center / fitBounds on map
+      setLocateTrigger(prev => prev + 1);
+
+      // Smooth scroll viewport to the Detection Map and pulse highlight
+      setTimeout(() => {
+        const mapSection = document.querySelector('.geo');
+        if (mapSection) {
+          mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          mapSection.classList.add('map-highlight-pulse');
+          setTimeout(() => mapSection.classList.remove('map-highlight-pulse'), 2500);
+        }
+      }, 150);
+    } else if (action.type === 'apply_filters') {
+      if (payload.region) setRegion(payload.region);
+      if (payload.year) setYear(payload.year);
+      if (payload.measure) setMeasure(payload.measure);
+    } else if (action.type === 'open_monthly_trend') {
+      if (payload.month) setSelected(payload.month);
+    }
+  }, [region, regionInfo, extent]);
+
+  return (
+    <ChatProvider
+      base={base}
+      currentRegion={region}
+      currentYear={year}
+      currentMeasure={measure}
+      currentExtent={activeFilter.bbox || extent}
+      onDispatchAction={handleDispatchAction}
+    >
+      <main>
+        <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
+          <div className="header-actions">
+            <AssistantHeaderButton />
+            <button className="button theme-button" type="button"
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}
+            </button>
+            <a className="button" href={base+'/download?'+query+(year==='all' ? '' : '&year='+year)}><Download size={16}/> Monthly CSV</a>
+          </div>
+        </header>
     <section className="intro"><div><p className="location"><MapPin size={15}/> {regionInfo?.label ?? 'Sri Lanka'}</p><h1>Burning activity</h1><p>NASA FIRMS Â· Standard Processing Â· UTC</p></div>
       <div className="filters"><label><span>Region</span><select value={region} onChange={e=>setRegion(e.target.value)}>
       {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
@@ -329,7 +438,7 @@ function App() {
           {mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
         </button>
         <PlaceSearch onSelect={setPlace}/>
-        <form className="map-filters" key={region+selected+extent} onSubmit={event=>{
+        <form className="map-filters" key={region+selected+activeFilter.start+activeFilter.end+activeFilter.bbox} onSubmit={event=>{
           event.preventDefault();
           const values = new FormData(event.currentTarget);
           const start = values.get('start'), end = values.get('end');
@@ -404,11 +513,16 @@ function App() {
         </div>
         <DetectionMap layers={map?.layers} enabled={enabled} vertices={vertices} drawing={drawing}
           onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
-          extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}/>
+          extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}
+          locateTrigger={locateTrigger}/>
       </section>
     </div>}
     <footer>NASA FIRMS observations Â· Hotspots can include repeated detections and non-fire thermal sources.</footer>
-  </main>;
+      </main>
+      <AssistantFloatingPill />
+      <ChatPanel onExecuteAction={handleDispatchAction} />
+    </ChatProvider>
+  );
 }
 
 createRoot(document.getElementById('root')).render(<App/>);

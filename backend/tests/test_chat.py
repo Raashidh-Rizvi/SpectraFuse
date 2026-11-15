@@ -1,3 +1,4 @@
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pandas as pd
@@ -22,7 +23,7 @@ def test_chat_grounds_answer_in_matched_sensor_months(monkeypatch):
     monkeypatch.setattr(chat.requests, "post", provider)
 
     import json
-    result = main.chat(chat.ChatRequest(question="Compare MODIS and VIIRS in 2024."))
+    result: Any = main.chat(cast(Any, chat.ChatRequest(question="Compare MODIS and VIIRS in 2024.")))
     payload = provider.call_args.kwargs["json"]
     data = json.loads(payload["messages"][-1]["content"])["evidence"]
     summary = data["annual"]["2024"]
