@@ -29,7 +29,27 @@
 .sensor-legend label {display:inline-flex; align-items:center; gap:.35rem;}
 .sensor-legend i {display:inline-block; width:.65rem; height:.65rem; border:1px solid;}
 
-.map-expand {margin-top:.65rem;}
+.map-heading-actions {
+  display:flex;
+  align-items:end;
+  gap:.4rem;
+  flex:none;
+  max-width:100%;
+}
+#detection-map-controls .button,
+.map-heading-actions select {
+  min-height:32px;
+  padding:5px 8px;
+}
+.map-expand {justify-content:center; min-width:32px;}
+#detection-map-controls .place-search {margin:.45rem 0;}
+#detection-map-controls .map-filters {gap:.35rem .5rem; margin:.45rem 0;}
+#detection-map-controls .map-filters label {gap:.15rem; font-size:.75rem; min-width:0;}
+#detection-map-controls .map-filters input {max-width:100%; min-height:32px; padding:4px 6px;}
+#detection-map-controls input[name=bbox] {width:9rem;}
+#detection-map-controls .sensor-legend {gap:.2rem .65rem; margin-top:.4rem;}
+#detection-map-controls .sensor-legend input {margin:0;}
+.geo:not(.geo-expanded) .map-controls + .mapwrap {margin-top:8px;}
 .geo.geo-expanded {
   position:fixed;
   inset:0;
@@ -56,10 +76,9 @@
   background:#25305bf2;
 }
 .geo-expanded .map-controls .sectionhead {gap:.65rem;}
-.geo-expanded .map-controls .map-expand,
-.geo-expanded .map-controls .place-search,
-.geo-expanded .map-controls .map-filters,
-.geo-expanded .map-controls .sensor-legend {margin:0;}
+.geo-expanded #detection-map-controls .place-search,
+.geo-expanded #detection-map-controls .map-filters,
+.geo-expanded #detection-map-controls .sensor-legend {margin:0;}
 .geo-expanded .map-controls .place-search {flex:1 1 220px;}
 .geo-expanded .map-controls .sensor-legend {flex-basis:100%;}
 :root[data-theme=light] .geo-expanded .map-controls {background:#eff4fff5;}
@@ -323,7 +342,7 @@
   width: 100%;
 }
 .chat-message-row.user-row {
-  flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 .chat-message-row .avatar {
   display: grid;
@@ -334,10 +353,7 @@
   flex-shrink: 0;
   font-size: 0.75rem;
 }
-.user-avatar {
-  background: #387df4;
-  color: #fff;
-}
+.user-avatar,
 .assistant-avatar {
   background: linear-gradient(135deg, #ff861f, #e52e3e);
   color: #fff;
@@ -663,3 +679,24 @@
   scroll-margin: 30px;
 }
 
+
+.map .leaflet-control-layers {
+  color: #18243b;
+  color-scheme: light;
+}
+.map .leaflet-control-layers label > span {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-height: 32px;
+}
+.map .leaflet-control-layers label span {
+  color: inherit;
+  font-size: .8rem;
+  margin: 0;
+}
+.map .leaflet-control-layers-selector {
+  top: 0;
+  margin: 0;
+  accent-color: #254da3;
+}

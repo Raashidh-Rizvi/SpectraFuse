@@ -54,10 +54,6 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
       attribution: osmAttribution,
       maxZoom: 19,
     }).addTo(view);
-    const dark = L.tileLayer('https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: osmAttribution + ', &copy; <a href="https://carto.com/attribution/">CARTO</a>',
-      maxZoom: 19,
-    });
     const terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
       attribution: osmAttribution + ', SRTM | &copy; <a href="https://opentopomap.org/about">OpenTopoMap (CC BY-SA)</a>',
       maxNativeZoom: 17,
@@ -74,7 +70,6 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
     ]);
     L.control.layers({
       'Street (OpenStreetMap)': street,
-      'Dark': dark,
       'Terrain': terrain,
       'Satellite': satellite,
       'Terrain + Satellite': terrainSatellite,
@@ -312,6 +307,10 @@ function App() {
   const anomalyKey = measure + '_anomaly';
   const maximum = Math.max(1,...visible.map(row => percent ? Math.abs(row[anomalyKey] ?? 0) : row[measure] ?? 0));
   const chart = visible;
+  const trendColors = theme === 'dark'
+    ? {[modis]:'#ff9caf', [viirs]:'#ffd08a', harmonized:'#b3f5ff', [noaa]:'#f6b2e1'}
+    : {[modis]:'#a11535', [viirs]:'#914000', harmonized:'#124ca7', [noaa]:'#8b185f'};
+  const trendGrid = theme === 'dark' ? '#e2ebff40' : '#23345d38';
   const errorMetric = metrics.find(row => row.Method === 'Calibrated MODIS');
   const [locateTrigger, setLocateTrigger] = useState(0);
 
@@ -428,11 +427,14 @@ function App() {
         <label className="toggle"><input type="checkbox" checked={compareTrends}
           onChange={event=>setCompareTrends(event.target.checked)}/> Compare sensor trends</label>
         <div className="chart"><ResponsiveContainer><AreaChart data={chart} margin={{left:1,right:13,top:10,bottom:0}}>
-          <CartesianGrid vertical={false} stroke="#c5d1ff35"/><XAxis dataKey="month" tick={{fill:'var(--chart-label)',fontSize:11}} minTickGap={28}/><YAxis width={49} tick={{fill:'var(--chart-label)',fontSize:11}}/>
-          <Tooltip contentStyle={{background:'#1b2450',border:'1px solid #8ba0dd',borderRadius:10}} formatter={(value,name)=>[format(value),name]}/>
+          <CartesianGrid vertical={false} stroke={trendGrid}/><XAxis dataKey="month" tick={{fill:'var(--chart-label)',fontSize:11}} minTickGap={28}/><YAxis width={49} tick={{fill:'var(--chart-label)',fontSize:11}}/>
+          <Tooltip contentStyle={{background:theme === 'dark' ? '#17213d' : '#fff',border:'1px solid #8ba0dd',borderRadius:10,color:'var(--chart-label)'}}
+            cursor={{stroke:trendGrid}} formatter={(value,name)=>[format(value),name]}/>
           <Legend/>
           {(compareTrends ? primaryLayers : [measure]).map(key=><Area key={key} type="linear" dataKey={key} name={names[key]}
-            stroke={sensorColors[key].fill} strokeWidth={2} strokeDasharray={key==='harmonized'?'5 3':undefined} fill="none"/>)}
+            stroke={trendColors[key]} strokeWidth={3} strokeDasharray={key==='harmonized'?'6 3':undefined}
+            fill={trendColors[key]} fillOpacity={compareTrends ? 0 : .12}
+            dot={{r:3, fill:trendColors[key], strokeWidth:0}}/>)}
         </AreaChart></ResponsiveContainer></div>
       </section>
       <section className="panel compare dark"><h2>Sensor comparison</h2><p>{selected || 'Select a month'}</p><div className="chart"><ResponsiveContainer><BarChart data={comparisonLayers.map(key=>({name:names[key],count:selectedRow?.[key]}))}>
@@ -465,15 +467,17 @@ function App() {
           <div id="detection-map-controls" hidden={mapExpanded && controlsCollapsed}>
           <div className="sectionhead"><div><h2>Detection map</h2>
         <p>{activeFilter.start} to {activeFilter.end} · {map?.provenance ?? 'NASA FIRMS Standard Processing'}</p></div>
+        <div className="map-heading-actions">
         <label><span>Map product</span><select value={sensor} onChange={e=>{
           setSensor(e.target.value);
           setEnabled(previous=>[...new Set([...previous,e.target.value])]);
-        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label></div>
+        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label>
         <button type="button" className="button map-expand" aria-pressed={mapExpanded}
+          aria-label="Fullscreen map" title={mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
           onClick={() => setMapExpanded(value => !value)}>
           {mapExpanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}
-          {mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
         </button>
+        </div></div>
         <PlaceSearch onSelect={setPlace}/>
         <form className="map-filters" key={region+selected+activeFilter.start+activeFilter.end+activeFilter.bbox} onSubmit={event=>{
           event.preventDefault();
@@ -509,7 +513,6 @@ function App() {
           <label>Bounding box<input name="bbox" required defaultValue={activeFilter.bbox}
             aria-label="Bounding box west,south,east,north"/></label>
           <button type="submit" className="button">Apply filters</button>
-        </form>
         <div className="header-actions">
           <button type="button" className="button" onClick={() => {
             if (drawing) setPolygon(vertices.map(pair=>pair.join(',')).join(';'));
@@ -520,6 +523,7 @@ function App() {
             setDrawing(false);setVertices([]);setPolygon('');
           }}>Clear</button>}
         </div>
+        </form>
         {drawing && <small>Click at least three points on the map, then apply.</small>}
         <div className="sensor-legend" aria-label="Map layers">
           {comparisonLayers.map(key=>{
@@ -540,10 +544,10 @@ function App() {
         {map?.layers.harmonized.factor != null && <small>
           MODIS counts scaled by {format(map.layers.harmonized.factor)}. Regional monthly holdout
           90th-percentile absolute error: {format(map.layers.harmonized.monthly_error_p90)} detections.
-          Cell-level uncertainty is unavailable.
+          Cell-level uncertainty is unavailable.{' '}
         </small>}
         {map?.layers.harmonized.status === 'Observed by VIIRS' && <small>
-          Harmonized cells contain observed S-NPP counts. Partition coverage cannot establish satellite coverage.
+          Harmonized cells contain observed S-NPP counts. Partition coverage cannot establish satellite coverage.{' '}
         </small>}
         {selected && sensor !== 'harmonized' && <small><a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download calendar-month detections</a></small>}
           </div>
