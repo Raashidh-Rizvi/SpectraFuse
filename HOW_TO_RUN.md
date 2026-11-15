@@ -45,20 +45,29 @@ Select the existing `spectra-fuse-kbpe` project if you are updating the current 
 
 ## Ask about the dataset
 
-Set `OPENAI_API_KEY` and `OPENAI_MODEL` in the project `.env` or in the
-backend environment. Choose a model supported by your OpenAI project that
-accepts Chat Completions and has enough context for the selected archive.
-Restart FastAPI, select a region and open **Ask about the dataset**.
-The backend sends your question, recent chat turns and the region's monthly
-aggregates to OpenAI. The API key stays on the backend. Configure access
-controls at the hosting layer before enabling a paid API key on a public site.
+Select a region and open **Ask about the dataset**. These questions work with
+the local archive even when OpenAI is unconfigured.
 
-Try asking "Compare MODIS and VIIRS S-NPP in 2024 using months where both
-have coverage. Report matched totals and the strongest anomaly." The system
-prompt lives in `backend/chat.py`. Chat covers monthly detections, estimates,
-coverage, anomalies and calibration metrics. Raw coordinates and FRP are
-outside the chat evidence. The selected region governs chat independently
-of the chart's year and sensor filters.
+- "What is the oldest data available in the MODIS dataset?"
+- "What is the mean monthly fire detections for MODIS in 2024?"
+
+For broader questions and follow-ups, set `OPENAI_API_KEY` and `OPENAI_MODEL`
+in the project `.env` or the backend environment and restart FastAPI. Choose
+a model that supports Chat Completions and JSON mode. [OpenAI JSON mode documentation](https://developers.openai.com/api/docs/guides/structured-outputs#json-mode)
+
+The model maps the question to lookups. The backend reads the region's archive
+and sends the question, recent chat turns and computed evidence to the model.
+The API key stays on the backend. Configure access controls at the hosting
+layer before enabling a paid API key on a public site.
+
+The answer shows the product, retrieved dates and coverage. Coverage dates come
+from downloaded UTC partitions, including days with zero detections. Monthly
+averages include complete months with zero detections and omit missing months.
+Comparisons use months shared by the requested sensors. Ask for anomaly or
+calibration summaries, or try "What was the mean MODIS FRP in February 2024?"
+FRP queries support up to 12 months per lookup and use measurements in megawatts
+per detection from the available daily files. Specify dates in your question
+to limit the lookup independently of the chart's year and sensor filters.
 
 To ingest a period from NASA FIRMS, set `FIRMS_MAP_KEY` and run:
 

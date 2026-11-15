@@ -1,5 +1,6 @@
 import calendar as cal
 from datetime import date
+from functools import cache
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
@@ -8,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.analytics import evaluate_overlap, historical_anomalies
-from backend.chat import ChatRequest, answer, evidence
+from backend.chat import ChatRequest, answer
 from backend.fire import (ROOT, PRODUCTS, SOURCES, area_value, calibration_factor,
                           calibration_split, data_directory, monthly, workspace)
 
@@ -106,19 +107,25 @@ def download(region: str = "sri-lanka", year: int | None = None):
                     headers={"Content-Disposition": "attachment; filename=firescope-monthly.csv"})
 
 
-def dashboard_frame(region):
+def noaa_monthly_counts(area):
     import pyarrow.parquet as pq
 
-    frame = calendar_table(region)
     source = PRODUCTS[-1]
-    files = (workspace(resolve(region)) / "processed" / source).glob("*.parquet")
+    files = (workspace(area) / "processed" / source).glob("*.parquet")
     totals = {}
     for path in files:
         month = path.stem[:7]
         days, count = totals.get(month, (0, 0))
-        totals[month] = days + 1, count + pq.ParquetFile(path).metadata.num_rows
-    frame[source] = pd.Series({month: count for month, (days, count) in totals.items()
-                               if days == cal.monthrange(*map(int, month.split("-")))[1]}, dtype=float)
+        with pq.ParquetFile(path) as partition:
+            totals[month] = days + 1, count + partition.metadata.num_rows
+    return pd.Series({month: count for month, (days, count) in totals.items()
+                      if days == cal.monthrange(*map(int, month.split("-")))[1]},
+                     name=source, dtype=float).rename_axis("month")
+
+
+def dashboard_frame(region):
+    frame = calendar_table(region)
+    frame[PRODUCTS[-1]] = noaa_monthly_counts(resolve(region))
     for name in (*PRODUCTS, "harmonized"):
         frame[name + "_anomaly"] = historical_anomalies(frame[name])["Departure (%)"]
     heldout, metrics = evaluate_overlap(frame)
@@ -253,13 +260,17 @@ def regions():
 
 @app.post("/api/fire/chat")
 def chat(request: ChatRequest):
-    frame = dashboard_frame(request.region)
-    if frame.empty:
-        raise HTTPException(404, "This dataset has no monthly records.")
-    _, metrics = evaluate_overlap(frame)
-    data = evidence(frame, metrics, request.region)
-    return {"answer": answer(request, data), "source": data["source"],
-            "first_month": frame.index.min(), "last_month": frame.index.max()}
+    area = resolve(request.region)
+
+    @cache
+    def base_frame():
+        return calendar_table(request.region)
+
+    def load_frame(include_noaa):
+        frame = base_frame()
+        return frame.join(noaa_monthly_counts(area), how="outer").sort_index() if include_noaa else frame
+
+    return answer(request, area, load_frame)
 
 
 frontend = ROOT / "frontend" / "dist"
