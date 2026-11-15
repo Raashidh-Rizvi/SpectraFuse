@@ -45,6 +45,19 @@ Select the existing `spectra-fuse-kbpe` project if you are updating the current 
 
 ## Ask about the dataset
 
+Select a region and open the assistant. These questions work with the local
+archive even when OpenAI is unconfigured.
+
+- "What is the oldest data available in the MODIS dataset?"
+- "What is the mean monthly fire detections for MODIS in 2024?"
+- "What was the mean MODIS FRP in February 2024?"
+
+The answer shows the product, retrieved dates and coverage. Coverage dates come
+from downloaded UTC partitions, including days with zero detections. Monthly
+averages include complete months with zero detections and omit missing months.
+Comparisons use months shared by the requested sensors.
+After a coverage answer, ask "And the latest?" to check the same sensor.
+
 Set `OPENAI_API_KEY` in the project `.env` or backend environment.
 The assistant uses OpenAI's Responses API for explanations, clarification,
 and cited web search. Set `OPENAI_WEB_MODEL` if your existing
@@ -61,6 +74,14 @@ and explain the coverage.” For web search, try “Look up NASA FIRMS
 documentation and explain why a detection count differs from a fire count.”
 If the OpenAI key is missing or the request fails, the archive agent
 provides its existing answer.
+Set `OPENAI_MODEL` to enable model-assisted archive lookups in the dashboard
+for questions that need more flexible interpretation.
+
+The original dataset chat API also accepts a `question` request at
+`POST /api/fire/chat`. For broader questions in this format, set `OPENAI_MODEL`
+to a model that supports Chat Completions and JSON mode. It maps the question
+to validated archive lookups, including fire radiative power statistics in
+megawatts per detection for an explicit period of up to 12 months.
 
 To ingest a period from NASA FIRMS, set `FIRMS_MAP_KEY` and run:
 

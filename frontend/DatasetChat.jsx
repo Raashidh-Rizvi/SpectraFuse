@@ -1,5 +1,20 @@
 import React, {useState} from 'react';
 
+const products = {
+  MODIS_SP: 'MODIS', VIIRS_SNPP_SP: 'VIIRS S-NPP', VIIRS_NOAA20_SP: 'VIIRS NOAA-20',
+  harmonized: 'Harmonized', 'MODIS_SP / VIIRS_SNPP_SP': 'MODIS / VIIRS S-NPP',
+};
+const bases = {
+  daily_partitions: 'downloaded UTC days', complete_months: 'complete months',
+  matched_months: 'matched months', anomaly_months: 'months with anomaly values', holdout_months: 'holdout months',
+};
+
+function citationLabel({product, basis, first, last, available, expected, start_month, end_month}) {
+  const count = expected == null ? available : `${available} of ${expected}`;
+  const period = first ? (first === last ? first : `${first} to ${last}`) : [start_month, end_month].filter(Boolean).join(' to ');
+  return `${products[product] ?? product} · ${count} ${bases[basis]}${period ? ` · ${period}` : ''}`;
+}
+
 export default function DatasetChat({base, region, label}) {
   const [question, setQuestion] = useState('');
   const [history, setHistory] = useState([]);
@@ -24,7 +39,7 @@ export default function DatasetChat({base, region, label}) {
       const result = await response.json();
       if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Chat request failed.');
       setHistory([...history, message, {role:'assistant', content:result.answer, source:result.source,
-        period:result.first_month + ' to ' + result.last_month}]);
+        citations:result.citations}]);
       setQuestion('');
     } catch (failure) {
       setError(failure.message);
@@ -35,19 +50,24 @@ export default function DatasetChat({base, region, label}) {
 
   return <details className="panel dataset-chat">
     <summary>Ask about the dataset</summary>
-    <p>{label} · Monthly counts, coverage, anomalies and sensor comparisons</p>
+    <p>{label} · Archive coverage, monthly detections and fire radiative power</p>
     <div role="log" aria-label="Dataset conversation">
       {history.map((message, index) => <div className="chat-message" key={index}>
         <strong>{message.role === 'user' ? 'You' : 'SpectraFuse'}</strong>
         <p>{message.content}</p>
-        {message.source && <small>{message.source} · {message.period}</small>}
+        {message.citations?.length > 0 && <small>
+          {message.source}
+          {message.citations.map((citation, index) => <React.Fragment key={index}>
+            <br />{citationLabel(citation)}
+          </React.Fragment>)}
+        </small>}
       </div>)}
     </div>
     <form onSubmit={submit}>
       <label htmlFor="dataset-question">Question</label>
       <textarea id="dataset-question" value={question} maxLength={2000} disabled={pending}
         onChange={event => setQuestion(event.target.value)}
-        placeholder="Which months had the most fire detections in 2024?" required />
+        placeholder="What is the oldest data available in the MODIS dataset?" required />
       <button className="button" disabled={pending || !question.trim()} type="submit">
         {pending ? 'Analyzing…' : 'Ask'}
       </button>

@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from backend.chat import SYSTEM_PROMPT
+from backend.chat import ANSWER_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def explain(request, session, response, monthly_evidence):
             headers={"Authorization": f"Bearer {key}"},
             json={
                 "model": model,
-                "instructions": SYSTEM_PROMPT + """
+                "instructions": ANSWER_PROMPT + """
 Ask one focused clarifying question when missing details materially change the
 answer. Use the dashboard selection and prior turns to resolve references.
 Explain what the evidence shows and how to interpret it. Treat the local
