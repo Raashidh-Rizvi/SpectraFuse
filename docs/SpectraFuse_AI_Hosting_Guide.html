@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SpectraFuse AI System: Hosting and Operations Guide</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; font-size: 10pt; line-height: 1.5; color: #1b2433; margin: 0; }
+  h1 { font-size: 26pt; line-height: 1.15; margin: 0 0 6pt; color: #0b2447; }
+  h2 { font-size: 15pt; color: #0b2447; border-bottom: 2px solid #f26a21; padding-bottom: 3pt; margin: 22pt 0 8pt; break-after: avoid; }
+  h3 { font-size: 11.5pt; color: #19376d; margin: 14pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt 0; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  code { font-family: Consolas, "Courier New", monospace; font-size: 9pt; background: #eef2f8; padding: 0 3pt; border-radius: 2pt; }
+  pre { font-family: Consolas, "Courier New", monospace; font-size: 8.4pt; line-height: 1.4; background: #0f1b2d; color: #e6edf7; padding: 8pt 10pt; border-radius: 4pt; white-space: pre-wrap; word-break: break-word; margin: 4pt 0 9pt; break-inside: avoid; }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 4pt 0 10pt; font-size: 9pt; break-inside: avoid; }
+  thead { display: table-header-group; }
+  th { background: #0b2447; color: #fff; text-align: left; padding: 4pt 6pt; font-weight: 600; }
+  td { border: 1px solid #d3dbe8; padding: 4pt 6pt; vertical-align: top; }
+  tr { break-inside: avoid; }
+  tr:nth-child(even) td { background: #f6f8fc; }
+  .cover { padding-top: 70mm; break-after: page; }
+  .cover .kicker { color: #f26a21; font-weight: 700; letter-spacing: 2pt; font-size: 10pt; text-transform: uppercase; }
+  .cover .sub { font-size: 13pt; color: #3b4a63; margin: 8pt 0 26pt; }
+  .cover table { width: 70%; font-size: 9.5pt; }
+  .cover td:first-child { width: 32%; font-weight: 600; background: #f6f8fc; }
+  .note, .warn, .ok, .risk { padding: 7pt 10pt; border-left: 4px solid; border-radius: 3pt; margin: 6pt 0 10pt; break-inside: avoid; font-size: 9.5pt; }
+  .note { background: #eaf2ff; border-color: #2f6fed; }
+  .warn { background: #fff4e5; border-color: #f2a100; }
+  .ok { background: #e8f7ee; border-color: #1f9d55; }
+  .risk { background: #fdecec; border-color: #d33; }
+  .note b:first-child, .warn b:first-child, .ok b:first-child, .risk b:first-child { text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.6pt; }
+  .toc { columns: 1; }
+  .toc li { margin-bottom: 2pt; }
+  .pb { break-before: page; }
+  svg { max-width: 100%; height: auto; display: block; margin: 6pt auto 10pt; }
+  .small { font-size: 8.5pt; color: #55627a; }
+  .tag { display: inline-block; font-size: 8pt; font-weight: 700; padding: 0 5pt; border-radius: 8pt; color: #fff; }
+  .t-ok { background: #1f9d55; } .t-warn { background: #d98a00; } .t-no { background: #c93232; }
+</style>
+</head>
+<body>
+
+<!-- ============================ COVER ============================ -->
+<div class="cover">
+  <div class="kicker">SpectraFuse &middot; Agentic AI</div>
+  <h1>Hosting and Operations Guide<br>for the SpectraFuse AI System</h1>
+  <div class="sub">What to decide, configure, secure and monitor when the multi-agent assistant goes online together with the dashboard.</div>
+  <table>
+    <tr><td>Applies to</td><td>SpectraFuse dashboard + 7-agent chat assistant (Phases 1&ndash;8)</td></tr>
+    <tr><td>Document date</td><td>15 November 2026</td></tr>
+    <tr><td>Verified build</td><td>84 backend tests passing, 0 type diagnostics, production build clean</td></tr>
+    <tr><td>Audience</td><td>Whoever deploys and runs the system</td></tr>
+  </table>
+  <p class="small" style="margin-top:22pt">Every statement about the code in this guide was checked against the repository at the time of writing. Items that are <b>not implemented</b> are labelled as such in Section 13 so nothing here is mistaken for a shipped feature.</p>
+</div>
+
+<!-- ============================ TOC ============================ -->
+<h2 style="margin-top:0">Contents</h2>
+<ol class="toc">
+  <li>Executive summary and recommendation</li>
+  <li>What you are hosting</li>
+  <li>Verified state and the defects Phase 8 fixed</li>
+  <li>Choosing a hosting model</li>
+  <li>Pre-launch checklist</li>
+  <li>Configuration and secrets</li>
+  <li>Hosting the data</li>
+  <li>Hosting chat memory (session state)</li>
+  <li>Running the language-model providers</li>
+  <li>Security hardening for a public site</li>
+  <li>Deployment runbooks (Docker, Vercel, Windows)</li>
+  <li>Observability, smoke tests and operations</li>
+  <li>Known gaps and roadmap (honest list)</li>
+  <li>Appendix: quick reference</li>
+</ol>
+
+<!-- ============================ 1 ============================ -->
+<h2>1. Executive summary and recommendation</h2>
+<p>SpectraFuse is a read-only analytics application: a React dashboard and a FastAPI service that answer from pre-processed NASA FIRMS Parquet files. The AI assistant adds a deterministic multi-agent layer on top. It is cheap to run, because the language model never computes numbers and the system works fully offline when no provider key is present. Three properties of the AI layer drive almost every hosting decision:</p>
+<ol>
+  <li><b>It is stateful.</b> Follow-ups such as &ldquo;explain that&rdquo; or &ldquo;show it on the map&rdquo; depend on the last four question-and-answer pairs, held in the memory of the running process.</li>
+  <li><b>It calls paid third-party APIs</b> (Groq, Gemini or OpenAI) with a backend-held key, and has no built-in authentication or rate limiting.</li>
+  <li><b>It needs about 167 MB of Parquet data</b> next to the code, read-only.</li>
+</ol>
+<div class="ok"><b>Recommendation.</b> Host the application as <b>one container with one worker</b> on a container platform or small VM, behind HTTPS and an edge rate limiter, with the data on a read-only volume and keys in the platform's secret store. This preserves chat memory with no extra infrastructure. Add a shared session store (Redis) only when you need more than one instance.</div>
+<div class="warn"><b>Existing Vercel deployment.</b> Vercel functions are stateless, so in-process chat memory is not reliable there. The dashboard, map and single-turn questions work. Follow-up questions can lose context between requests. Use Vercel for the dashboard if you wish, but host the chat on the container for full behaviour, or implement the shared store in Section 8 first.</div>
+
+<!-- ============================ 2 ============================ -->
+<h2>2. What you are hosting</h2>
+<svg viewBox="0 0 720 330" width="720" font-family="Segoe UI, Arial" font-size="12">
+  <rect x="8" y="8" width="704" height="314" rx="8" fill="#f6f8fc" stroke="#d3dbe8"/>
+  <rect x="24" y="40" width="130" height="64" rx="6" fill="#fff" stroke="#2f6fed"/><text x="89" y="66" text-anchor="middle" font-weight="700">Browser</text><text x="89" y="84" text-anchor="middle" font-size="10.5">React dashboard</text><text x="89" y="97" text-anchor="middle" font-size="10.5">+ chat panel</text>
+  <rect x="200" y="28" width="150" height="88" rx="6" fill="#fff" stroke="#f26a21"/><text x="275" y="52" text-anchor="middle" font-weight="700">Edge / reverse proxy</text><text x="275" y="70" text-anchor="middle" font-size="10.5">HTTPS, rate limit,</text><text x="275" y="83" text-anchor="middle" font-size="10.5">optional auth / WAF</text><text x="275" y="104" text-anchor="middle" font-size="9.5" fill="#c05000">(you provide this)</text>
+  <rect x="396" y="16" width="300" height="190" rx="6" fill="#fff" stroke="#0b2447" stroke-width="1.6"/><text x="546" y="36" text-anchor="middle" font-weight="700">App container (1 worker)</text>
+  <rect x="410" y="46" width="130" height="44" rx="4" fill="#eaf2ff" stroke="#2f6fed"/><text x="475" y="64" text-anchor="middle" font-size="11">FastAPI routes</text><text x="475" y="79" text-anchor="middle" font-size="10">/api/fire/*</text>
+  <rect x="552" y="46" width="130" height="44" rx="4" fill="#eaf2ff" stroke="#2f6fed"/><text x="617" y="64" text-anchor="middle" font-size="11">Orchestrator + 6</text><text x="617" y="79" text-anchor="middle" font-size="10">specialist agents</text>
+  <rect x="410" y="100" width="130" height="44" rx="4" fill="#fff4e5" stroke="#f2a100"/><text x="475" y="118" text-anchor="middle" font-size="11">Session memory</text><text x="475" y="133" text-anchor="middle" font-size="10">in process, TTL 2 h</text>
+  <rect x="552" y="100" width="130" height="44" rx="4" fill="#eaf2ff" stroke="#2f6fed"/><text x="617" y="118" text-anchor="middle" font-size="11">Deterministic tools</text><text x="617" y="133" text-anchor="middle" font-size="10">pandas / pyarrow</text>
+  <rect x="410" y="154" width="272" height="40" rx="4" fill="#eef2f8" stroke="#8da2c0"/><text x="546" y="171" text-anchor="middle" font-size="11">Static React build (frontend/dist)</text><text x="546" y="185" text-anchor="middle" font-size="10">served by FastAPI at /</text>
+  <rect x="396" y="232" width="140" height="64" rx="6" fill="#fff" stroke="#1f9d55"/><text x="466" y="256" text-anchor="middle" font-weight="700">Data volume</text><text x="466" y="273" text-anchor="middle" font-size="10.5">Parquet, read-only</text><text x="466" y="287" text-anchor="middle" font-size="10.5">~167 MB</text>
+  <rect x="556" y="232" width="140" height="64" rx="6" fill="#fff" stroke="#8a4fff"/><text x="626" y="256" text-anchor="middle" font-weight="700">LLM provider</text><text x="626" y="273" text-anchor="middle" font-size="10.5">Groq / Gemini / OpenAI</text><text x="626" y="287" text-anchor="middle" font-size="10.5">falls back to offline</text>
+  <line x1="154" y1="72" x2="200" y2="72" stroke="#55627a" marker-end="url(#a)"/><line x1="350" y1="72" x2="396" y2="72" stroke="#55627a" marker-end="url(#a)"/>
+  <line x1="466" y1="206" x2="466" y2="232" stroke="#55627a" marker-end="url(#a)"/><line x1="626" y1="206" x2="626" y2="232" stroke="#55627a" marker-end="url(#a)"/>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#55627a"/></marker></defs>
+  <text x="24" y="320" font-size="10" fill="#55627a">The browser never holds a provider key or the FIRMS key. Only the container talks to the LLM provider.</text>
+</svg>
+<table>
+  <tr><th style="width:26%">Component</th><th>Where it lives</th><th style="width:24%">State</th></tr>
+  <tr><td>React dashboard and chat UI</td><td><code>frontend/</code>, built to <code>frontend/dist</code>, served by FastAPI</td><td>Stateless. Browser keeps only a session ID in <code>localStorage</code>.</td></tr>
+  <tr><td>FastAPI service</td><td><code>backend/main.py</code></td><td>Stateless apart from the items below.</td></tr>
+  <tr><td>Agent layer</td><td><code>backend/agents/</code> (orchestrator, data, analysis, map, explanation, export, validation)</td><td>Stateless logic.</td></tr>
+  <tr><td>Session memory</td><td><code>backend/agents/memory.py</code> (<code>SessionStore</code>)</td><td><b>Stateful, in process.</b></td></tr>
+  <tr><td>Monthly table cache</td><td>In-process caches in the tools layer</td><td>Rebuildable, safe to lose.</td></tr>
+  <tr><td>Archive data</td><td><code>data/&lt;region&gt;/processed/**/*.parquet</code></td><td>Read-only files.</td></tr>
+  <tr><td>Provider keys</td><td>Environment variables / <code>.env</code></td><td>Secrets.</td></tr>
+</table>
+
+<!-- ============================ 3 ============================ -->
+<h2>3. Verified state and the defects Phase 8 fixed</h2>
+<table>
+  <tr><th>Check</th><th>Result</th></tr>
+  <tr><td>Backend test suite</td><td><span class="tag t-ok">84 passed</span> including the 22-question evaluation benchmark</td></tr>
+  <tr><td>Type check (<code>pyrefly</code>)</td><td><span class="tag t-ok">0 diagnostics</span></td></tr>
+  <tr><td>React production build</td><td><span class="tag t-ok">builds</span>, both from the repo and from the staged Vercel folder</td></tr>
+  <tr><td>Windows launcher <code>run-web.ps1</code></td><td><span class="tag t-ok">works</span>: install, build and serve on one port</td></tr>
+  <tr><td>Live endpoint smoke test</td><td><span class="tag t-ok">passed</span>: health, capabilities, chat, follow-up with memory, greeting, injection refusal, oversize rejection (HTTP 422), session delete</td></tr>
+  <tr><td>Vercel staging <code>stage_vercel.py</code></td><td><span class="tag t-ok">fixed and verified</span>: agents, UI and runtime packages now staged; staged backend imports cleanly</td></tr>
+  <tr><td>Docker image</td><td><span class="tag t-warn">Not built here</span> The Docker daemon would not start on the verification machine, so <code>docker build</code> was <b>not run</b>. The corrected Dockerfile's COPY sources were checked, and the application was started from a copy of exactly the files it copies (health healthy, chat answering, dashboard served). Run <code>docker build</code> in your own pipeline before release.</td></tr>
+</table>
+<h3>Defects found during Phase 8 verification</h3>
+<table>
+  <tr><th style="width:4%">#</th><th style="width:34%">Defect</th><th>Effect if left in</th><th style="width:16%">Status</th></tr>
+  <tr><td>1</td><td><code>stage_vercel.py</code> did not copy <code>backend/agents/</code></td><td>Deployed API crashes at start-up: <code>main.py</code> imports the agent package.</td><td><span class="tag t-ok">Fixed</span></td></tr>
+  <tr><td>2</td><td>Staged <code>requirements.txt</code> was <b>empty</b>. The filter matched <code>name==</code> but the file uses <code>&gt;=</code>.</td><td>Vercel installs no packages; the function cannot start.</td><td><span class="tag t-ok">Fixed</span></td></tr>
+  <tr><td>3</td><td><code>frontend/components/</code> and <code>frontend/context/</code> were not staged</td><td>Vite build fails on the chat imports in <code>src.jsx</code>.</td><td><span class="tag t-ok">Fixed</span></td></tr>
+  <tr><td>4</td><td><code>Dockerfile</code> used <code>COPY backend/*.py</code>, which skips subfolders</td><td>Container starts without <code>backend/agents/</code> and fails on import.</td><td><span class="tag t-ok">Fixed</span></td></tr>
+  <tr><td>5</td><td>Validation agent treated a question about a year before 1990 (for example 1980) as an unverified figure</td><td>A false &ldquo;unverified&rdquo; note on an otherwise correct &ldquo;unavailable&rdquo; answer.</td><td><span class="tag t-ok">Fixed, regression-tested</span></td></tr>
+  <tr><td>6</td><td>Capabilities endpoint omitted intents added in Phase 7</td><td>Inaccurate API self-description.</td><td><span class="tag t-ok">Fixed</span></td></tr>
+</table>
+<p>Defects 1&ndash;4 would each have produced a deployment that built but did not work. This is the main reason to always run the smoke test in Section 12 against the real deployed URL, not only the test suite.</p>
+
+<!-- ============================ 4 ============================ -->
+<h2 class="pb">4. Choosing a hosting model</h2>
+<table>
+  <tr><th style="width:17%">Option</th><th style="width:27%">Fits when</th><th>Strengths</th><th>Problems specific to this app</th></tr>
+  <tr><td><b>A. Single container on a VM or container host</b> <span class="tag t-ok">Recommended</span></td><td>You want the full assistant with working follow-ups and the least moving parts.</td><td>Memory works as designed. Simple to reason about. Data mounts read-only. One bill.</td><td>You provide HTTPS and rate limiting. Scaling out later needs the shared store.</td></tr>
+  <tr><td><b>B. Managed container service</b> (Cloud Run, Azure Container Apps, Render, Fly, Railway)</td><td>You want managed TLS, deploys and restarts without running a server.</td><td>Managed HTTPS, secret store, health checks, easy rollbacks.</td><td>Pin to <b>one instance</b> (min = max = 1) or memory splits across instances. Many platforms scale to zero, which wipes memory after idle: set minimum instances to 1. Data volume support varies; if absent, bake the Parquet into the image (about 167 MB).</td></tr>
+  <tr><td><b>C. Vercel (existing)</b></td><td>Dashboard-first, occasional chat, no follow-up reliance.</td><td>Already set up. Free preview URLs. Global CDN for the dashboard.</td><td>Stateless functions break chat memory. Function bundle holds about 167 MB of data plus pandas and pyarrow: confirm it fits your plan's current bundle and duration limits. Worst-case provider wait is 3 tries &times; 15 s per call, so check your function timeout.</td></tr>
+  <tr><td><b>D. Split: dashboard on Vercel, chat API on a container</b></td><td>You want the CDN for the UI and a stateful API.</td><td>Best of both for a larger audience.</td><td>Needs CORS configured (not enabled today, see Section 10) and the frontend API base URL set at build time.</td></tr>
+</table>
+<div class="note"><b>Rule of thumb.</b> If a person will have a back-and-forth conversation with the assistant, host the chat where one process serves the whole conversation. If every request is independent, any option works.</div>
+<h3>Capacity expectations</h3>
+<p>Local measurements show deterministic answers completing in tens of milliseconds, and a memory-based follow-up in under one millisecond. The cost driver is the optional language-model call, not the analytics. A small instance (1 vCPU, 1&ndash;2 GB RAM) is a sensible starting size: the largest memory consumer is pandas loading monthly tables, and chat sessions are small (eight turns each, capped at 5,000 sessions).</p>
+
+<!-- ============================ 5 ============================ -->
+<h2>5. Pre-launch checklist</h2>
+<table>
+  <tr><th style="width:5%">&#9744;</th><th>Item</th><th style="width:18%">Section</th></tr>
+  <tr><td>&#9744;</td><td>Pick the hosting model and confirm it keeps <b>one process</b> serving each conversation</td><td>4, 8</td></tr>
+  <tr><td>&#9744;</td><td>Provider keys stored in the platform secret store, not in the image, repo or frontend</td><td>6</td></tr>
+  <tr><td>&#9744;</td><td>Any key ever pasted into chat, tickets or screenshots is <b>rotated</b></td><td>6</td></tr>
+  <tr><td>&#9744;</td><td>Data volume mounted read-only and readable by the container user</td><td>7</td></tr>
+  <tr><td>&#9744;</td><td>HTTPS enforced; HTTP redirected</td><td>10</td></tr>
+  <tr><td>&#9744;</td><td><b>Rate limit on <code>POST /api/fire/chat</code></b> at the edge (not built in)</td><td>10</td></tr>
+  <tr><td>&#9744;</td><td>Spending cap or alert on each provider account</td><td>9</td></tr>
+  <tr><td>&#9744;</td><td>Decide on access control (public, password, SSO) for the chat</td><td>10</td></tr>
+  <tr><td>&#9744;</td><td>Health check wired to <code>/api/fire/chat/health</code></td><td>12</td></tr>
+  <tr><td>&#9744;</td><td>Logs shipped to a searchable place with a retention period</td><td>12</td></tr>
+  <tr><td>&#9744;</td><td>Run the smoke test (Section 12) against the live URL</td><td>12</td></tr>
+  <tr><td>&#9744;</td><td>Write down the rollback step and the data-refresh step</td><td>11, 7</td></tr>
+  <tr><td>&#9744;</td><td>Privacy notice if users can type free text (session IDs are logged)</td><td>8, 10</td></tr>
+</table>
+
+<!-- ============================ 6 ============================ -->
+<h2 class="pb">6. Configuration and secrets</h2>
+<table>
+  <tr><th style="width:24%">Variable</th><th>Purpose</th><th style="width:22%">Secret?</th></tr>
+  <tr><td><code>LLM_PROVIDER</code></td><td><code>groq</code>, <code>gemini</code>, <code>openai</code>, or <code>mock</code>. Empty means auto-detect from keys present.</td><td>No</td></tr>
+  <tr><td><code>GROQ_API_KEY</code>, <code>GROQ_MODEL</code></td><td>GroqCloud. Default model <code>llama-3.3-70b-versatile</code>.</td><td><b>Key: yes</b></td></tr>
+  <tr><td><code>GEMINI_API_KEY</code>, <code>GEMINI_MODEL</code></td><td>Google Gemini. Default model <code>gemini-1.5-flash</code>.</td><td><b>Key: yes</b></td></tr>
+  <tr><td><code>OPENAI_API_KEY</code>, <code>OPENAI_MODEL</code></td><td>OpenAI. Default model <code>gpt-4o-mini</code>.</td><td><b>Key: yes</b></td></tr>
+  <tr><td><code>USE_MOCK_MODEL</code></td><td><code>true</code> forces the offline provider. Useful for staging and incident response.</td><td>No</td></tr>
+  <tr><td><code>FIRESCOPE_DATA_DIR</code></td><td>Absolute path to the Parquet data. Empty means <code>&lt;app&gt;/data</code>.</td><td>No</td></tr>
+  <tr><td><code>FIRMS_MAP_KEY</code></td><td>Needed <b>only</b> by the data-sync job that downloads new NASA data. Do not set it on the public web service.</td><td><b>Yes</b></td></tr>
+</table>
+<h3>Rules</h3>
+<ul>
+  <li>Set variables in the platform's secret manager and inject them at runtime. <code>.env</code> is git-ignored, and <code>.env</code>, <code>.env.*</code> and <code>data/</code> are excluded from the Docker build context by <code>.dockerignore</code>; keep it that way.</li>
+  <li>The browser bundle (<code>frontend/.env.production</code>) must contain only <code>VITE_API_BASE_URL</code>. Anything with a <code>VITE_</code> prefix is public.</li>
+  <li><b>Only one provider is primary at a time.</b> The factory selects the provider named in <code>LLM_PROVIDER</code>. Setting several keys does not create a chain such as Groq then Gemini. The only fallback is the offline provider.</li>
+  <li><b>Rotate any key that has been shared in plain text</b>, including in a chat window or screenshot, even if you believe it was a test key.</li>
+  <li>Use a separate key per environment (staging, production) so one can be revoked alone and spend is attributable.</li>
+  <li>The application never returns keys in responses, logs or telemetry, and the validation agent blocks answers that contain key-like strings or local file paths.</li>
+</ul>
+<div class="note"><b>Providers are optional.</b> With no keys, <code>LLM_PROVIDER</code> empty, the system starts in offline mode and every dashboard and chat feature still works. Treat live providers as an enhancement, not a dependency.</div>
+
+<!-- ============================ 7 ============================ -->
+<h2>7. Hosting the data</h2>
+<p>The application serves pre-processed Parquet and never needs the NASA key at request time.</p>
+<table>
+  <tr><th>Dataset</th><th>Files</th><th>Size</th></tr>
+  <tr><td>Sri Lanka pilot (<code>d73f2ecaea43efef</code>)</td><td>17,786 Parquet files</td><td>about 160 MB</td></tr>
+  <tr><td>Central Thailand (<code>ed6d413b174027ef</code>)</td><td>730 Parquet files</td><td>about 6.7 MB</td></tr>
+  <tr><td>Staged deployment archive (<code>processed-data.zip</code>)</td><td>18,520 entries</td><td>54 MB compressed, about 167 MB expanded</td></tr>
+</table>
+<h3>Recommended layout</h3>
+<ol>
+  <li><b>Read-only volume</b> mounted at <code>/app/data</code> (or any path, with <code>FIRESCOPE_DATA_DIR</code> pointing at it). Do not let the web service write to it.</li>
+  <li><b>Separate sync job</b> on a machine with writable storage and the <code>FIRMS_MAP_KEY</code>. It runs <code>python -m backend.fire sync ...</code> then produces fresh data.</li>
+  <li><b>Publish</b> new data by replacing the volume contents (or building a new image/staged bundle) and restarting the service. In-process caches are rebuilt on start.</li>
+</ol>
+<div class="warn"><b>Why not sync on the web server.</b> The FIRMS API has a transaction quota, downloads can be large, and a web process with write access to the archive and a NASA key has a larger attack surface. Keep ingestion and serving apart.</div>
+<h3>If your host cannot mount volumes</h3>
+<p>Bake the data into the image. The image grows by about 167 MB and every data refresh needs a new image, but it removes a moving part. Remove <code>data</code> from <code>.dockerignore</code> in that case and add a <code>COPY data/ ./data/</code> line, or use a multi-stage build that unpacks <code>processed-data.zip</code>.</p>
+<h3>Backups and integrity</h3>
+<ul>
+  <li>The raw CSV and Parquet are reproducible from NASA, but a full Sri Lanka rebuild is slow and quota-limited. Keep one backup copy of <code>data/</code> in object storage.</li>
+  <li>A month contributes a sensor total only when every calendar day has a processed partition. After a refresh, spot-check that a recent month is not unexpectedly blank.</li>
+</ul>
+
+<!-- ============================ 8 ============================ -->
+<h2 class="pb">8. Hosting chat memory (session state)</h2>
+<h3>What the memory holds</h3>
+<p>Each session keeps the last <b>4 question-and-answer pairs</b> (8 turns), plus the active region, year, month and period and the last detections, so that follow-ups resolve correctly. Greetings, thanks and acknowledgements are stored but do not overwrite the scientific context, so &ldquo;thank you&rdquo; followed by &ldquo;show that on the map&rdquo; still points at the earlier data.</p>
+<table>
+  <tr><th style="width:34%">Property</th><th>Current behaviour</th></tr>
+  <tr><td>Storage</td><td>Python dictionary in the server process (<code>SessionStore</code>)</td></tr>
+  <tr><td>Expiry</td><td>7,200 seconds (2 hours) of inactivity, checked on access</td></tr>
+  <tr><td>Capacity</td><td>5,000 sessions; least recently used are evicted first</td></tr>
+  <tr><td>Concurrency</td><td>Guarded for threads inside one process</td></tr>
+  <tr><td>Survives a restart or redeploy</td><td><span class="tag t-no">No</span> everyone loses context</td></tr>
+  <tr><td>Shared across instances</td><td><span class="tag t-no">No</span></td></tr>
+  <tr><td>Client identifier</td><td>Random session ID in browser <code>localStorage</code>; sent with every chat request</td></tr>
+  <tr><td>Message text in logs</td><td>Not logged. Telemetry records request ID, session ID, intent, duration and tools only.</td></tr>
+</table>
+<h3>What this means in production</h3>
+<table>
+  <tr><th style="width:30%">Situation</th><th>Result</th><th style="width:24%">What to do</th></tr>
+  <tr><td>One container, one worker, always on</td><td>Memory works perfectly. Restarts clear it.</td><td><b>Recommended start.</b> Keep <code>--workers 1</code>.</td></tr>
+  <tr><td>Several workers or instances</td><td>Follow-ups fail whenever a request lands on a process that has not seen the session.</td><td>Use sticky routing, or the shared store below.</td></tr>
+  <tr><td>Scale-to-zero platform</td><td>Memory wiped after idle.</td><td>Set minimum instances to 1.</td></tr>
+  <tr><td>Serverless functions</td><td>Instances are short-lived and parallel; memory is unreliable.</td><td>Do not rely on in-process memory.</td></tr>
+</table>
+<div class="risk"><b>Important.</b> The backend currently ignores the <code>history</code> field that the request schema accepts, and the frontend sends only the session ID and dashboard context. There is therefore no stateless fallback today. If you must run on stateless infrastructure, implement the shared store below first.</div>
+<h3>Upgrade path: shared session store (not implemented)</h3>
+<p>All memory access goes through <code>SessionStore</code> (<code>get_or_create</code>, <code>get</code>, <code>delete</code>, <code>active_session_count</code>), which makes a drop-in replacement straightforward. Recommended design:</p>
+<ul>
+  <li><b>Backend:</b> Redis (managed). One key per session, <code>spectrafuse:session:&lt;id&gt;</code>, value = the session serialised as JSON (the turn records are already Pydantic models).</li>
+  <li><b>Expiry:</b> set the key TTL to 7,200 seconds and refresh it on each request. This replaces the manual clean-up.</li>
+  <li><b>Window:</b> keep the cap at 8 turns when writing, exactly as today.</li>
+  <li><b>Selection:</b> choose the store by an environment variable, for example <code>SESSION_BACKEND=memory|redis</code> with <code>REDIS_URL</code>, defaulting to memory so local use and tests are unchanged.</li>
+  <li><b>Failure mode:</b> if Redis is unreachable, degrade to an empty session (answers still work, follow-ups lose context) and report it in <code>/chat/health</code>. Never fail the whole request.</li>
+  <li><b>Tests:</b> reuse the existing 12 memory tests unchanged against the Redis implementation, plus one test for expiry and one for the unreachable-store path.</li>
+</ul>
+<h3>Privacy and retention</h3>
+<ul>
+  <li>Session memory contains the user's questions and the derived answers. Treat it as personal data if users can type free text.</li>
+  <li>The two-hour expiry is the retention policy today. State it in your privacy notice. A shared store must keep the same TTL.</li>
+  <li><code>DELETE /api/fire/chat/session/&lt;id&gt;</code> removes one session. The chat panel's clear action calls it.</li>
+  <li>Do not add message text to logs or analytics without a deliberate decision.</li>
+</ul>
+
+<!-- ============================ 9 ============================ -->
+<h2 class="pb">9. Running the language-model providers</h2>
+<h3>How a request flows</h3>
+<ol>
+  <li>A deterministic router answers greetings, thanks, help and farewells with fixed text. <b>No model call, no cost.</b></li>
+  <li>Injection, credential and SQL-style probes are refused before any tool or model runs.</li>
+  <li>Follow-ups resolve from session memory. <b>No model call.</b></li>
+  <li>Remaining questions go to the orchestrator and specialist agents. Numbers always come from deterministic tools. The validation agent checks the final text against the evidence.</li>
+</ol>
+<h3>Provider behaviour</h3>
+<table>
+  <tr><th style="width:30%">Event</th><th>What happens</th></tr>
+  <tr><td>Rate limit (429) or server error (500/502/503/504)</td><td>Retried up to 2 times, then falls back to the offline provider</td></tr>
+  <tr><td>Timeout</td><td>15 seconds per attempt; same retry then fallback</td></tr>
+  <tr><td>Bad key, quota exhausted, network failure</td><td>Falls back to the offline provider; no crash; no credential in the error</td></tr>
+  <tr><td>No keys configured</td><td>Starts in offline mode</td></tr>
+</table>
+<p>Worst case, one provider call can take about 45 seconds (3 attempts at 15 seconds) before the fallback answers. Make sure the platform's request timeout is longer than this, or lower the retry count.</p>
+<h3>Cost and quota control</h3>
+<ul>
+  <li>Set a hard monthly budget and an alert on every provider account. This is your real protection against abuse of an open chat box.</li>
+  <li>Combine the budget with the edge rate limit in Section 10. The 4,000-character message cap limits the size of each prompt.</li>
+  <li>Choose small, inexpensive models. The model only phrases and routes; it does not need to be large.</li>
+  <li>Use <code>USE_MOCK_MODEL=true</code> as a kill switch: it stops all paid calls immediately and the product keeps working.</li>
+</ul>
+<h3>Provider monitoring</h3>
+<p><code>GET /api/fire/chat/health</code> returns the active provider, for example <code>groq (fallback: mock)</code>. It shows what is configured, not whether the last call succeeded. To detect silent fallback (an expired key, for instance), compare answer quality or add a counter for fallback events. This counter is not implemented (Section 13).</p>
+<h3>Switching providers</h3>
+<ol>
+  <li>Set the new key and <code>LLM_PROVIDER</code> in the secret store.</li>
+  <li>Restart the service. The provider is chosen at start-up.</li>
+  <li>Check <code>/api/fire/chat/health</code> shows the new provider.</li>
+  <li>Run the smoke test. Revoke the old key.</li>
+</ol>
+
+<!-- ============================ 10 ============================ -->
+<h2>10. Security hardening for a public site</h2>
+<table>
+  <tr><th style="width:24%">Control</th><th style="width:15%">Status</th><th>Detail</th></tr>
+  <tr><td>HTTPS</td><td><span class="tag t-warn">You provide</span></td><td>Terminate TLS at the platform or reverse proxy. Redirect HTTP to HTTPS. Add HSTS.</td></tr>
+  <tr><td>Rate limiting</td><td><span class="tag t-no">Not built in</span></td><td>Limit <code>POST /api/fire/chat</code> per IP at the edge (for example 20 requests per minute and a daily cap). Without it a public chat can run up provider bills.</td></tr>
+  <tr><td>Authentication</td><td><span class="tag t-no">None</span></td><td>All endpoints are open. For a private audience, put the site behind platform access control, SSO or basic authentication.</td></tr>
+  <tr><td>Message size limit</td><td><span class="tag t-ok">Built in</span></td><td>4,000 characters; larger requests get HTTP 422. Also set a body-size limit at the proxy.</td></tr>
+  <tr><td>Prompt-injection and credential probes</td><td><span class="tag t-ok">Built in</span></td><td>Refused before any tool or model runs. Covered by evaluation cases EV-13 to EV-15.</td></tr>
+  <tr><td>Secret and path leak guard</td><td><span class="tag t-ok">Built in</span></td><td>Validation agent blocks answers containing key-like strings or local file paths.</td></tr>
+  <tr><td>Numerical grounding</td><td><span class="tag t-ok">Built in</span></td><td>Figures must match evidence; unverified figures are annotated.</td></tr>
+  <tr><td>XSS in chat output</td><td><span class="tag t-ok">Built in</span></td><td>Markup in messages is escaped by the React renderer; covered by a Playwright test.</td></tr>
+  <tr><td>CORS</td><td><span class="tag t-warn">Not configured</span></td><td>Fine while the UI and API share one origin. If you split them (option D), add an allow-list limited to your UI domain. Never use a wildcard with credentials.</td></tr>
+  <tr><td>Container user</td><td><span class="tag t-ok">Non-root</span></td><td>The image now runs as an unprivileged <code>spectrafuse</code> user.</td></tr>
+  <tr><td>Dependency hygiene</td><td><span class="tag t-warn">You schedule</span></td><td>Run <code>pip-audit</code> and <code>npm audit</code> in CI; rebuild the image monthly.</td></tr>
+</table>
+<div class="warn"><b>The chat endpoint is the only costly one.</b> Dashboard endpoints read local files. Put your strictest limits on <code>/api/fire/chat</code> and keep the rest cacheable. A CDN may cache the dashboard GET endpoints because the data only changes on a refresh.</div>
+<h3>Reverse proxy sketch (Nginx)</h3>
+<pre><code>limit_req_zone $binary_remote_addr zone=chat:10m rate=20r/m;
+
+server {
+  listen 443 ssl http2;
+  server_name your.domain;
+  client_max_body_size 64k;                 # chat bodies are small
+
+  location = /api/fire/chat {
+    limit_req zone=chat burst=10 nodelay;
+    proxy_read_timeout 60s;                 # longer than the 45 s worst case
+    proxy_pass http://127.0.0.1:8001;
+  }
+  location / { proxy_pass http://127.0.0.1:8001; }
+}</code></pre>
+
+<!-- ============================ 11 ============================ -->
+<h2 class="pb">11. Deployment runbooks</h2>
+<h3>11.1 Docker (recommended)</h3>
+<pre><code># build
+docker build -t spectrafuse .
+
+# run: one container, data read-only, keys from an env file kept OUTSIDE the repo
+docker run -d --name spectrafuse --restart unless-stopped \
+  -p 127.0.0.1:8001:8001 \
+  --env-file /secure/spectrafuse.env \
+  --mount type=bind,source=/srv/spectrafuse/data,target=/app/data,readonly \
+  spectrafuse
+
+# verify
+docker ps                                   # STATUS should become "healthy"
+curl http://127.0.0.1:8001/api/fire/chat/health</code></pre>
+<ul>
+  <li>Publish the port on <code>127.0.0.1</code> and let the reverse proxy face the internet.</li>
+  <li>The container runs a single worker by design and includes a health check against <code>/api/fire/chat/health</code>.</li>
+  <li>The mounted data must be readable by the container's non-root user.</li>
+  <li>The image installs everything in <code>requirements.txt</code>, which includes development and Streamlit packages the API does not use. A lean production requirements file would reduce image size and attack surface (Section 13).</li>
+</ul>
+<div class="warn"><b>Docker verification note.</b> The Dockerfile was corrected in Phase 8 (agents folder, documents for the knowledge base, non-root user, health check, single worker). The Docker daemon could not be started on the verification machine, so the image build itself and the health check were <b>not executed</b>. What was verified: every COPY source exists, and the application starts, answers chat and serves the dashboard from a directory containing only the files the Dockerfile copies. The package installation step and the non-root permissions are the parts still to be confirmed. Run <code>docker build</code> and the Section 12 smoke test in your pipeline before the first release.</div>
+<h3>11.2 Managed container service</h3>
+<ol>
+  <li>Push the image to your registry.</li>
+  <li>Create the service with <b>minimum and maximum instances both set to 1</b> and port 8001.</li>
+  <li>Inject provider keys from the platform secret manager, not as plain variables in the console.</li>
+  <li>Attach the read-only data volume, or use an image with the data baked in.</li>
+  <li>Set the request timeout above 60 seconds.</li>
+  <li>Use <code>/api/fire/chat/health</code> as the health probe. Attach your domain and managed certificate.</li>
+</ol>
+<h3>11.3 Vercel (dashboard and stateless chat)</h3>
+<pre><code>python backend/scripts/stage_vercel.py          # builds .vercel-stage with agents, UI and data
+npx vercel@latest deploy --cwd .vercel-stage --archive=tgz          # preview
+npx vercel@latest deploy --cwd .vercel-stage --archive=tgz --prod   # publish</code></pre>
+<ul>
+  <li>Add provider keys in the Vercel project's environment settings. Staging excludes <code>.env</code> on purpose.</li>
+  <li>The staged runtime now includes the agent package and the packages it needs: fastapi, pydantic, pandas, numpy, pyarrow, python-dotenv, requests. The provider clients use plain HTTPS, so no vendor SDK is needed.</li>
+  <li>Staging stops with an error if a required runtime package is missing from <code>requirements.txt</code>, so this defect cannot return silently.</li>
+  <li>Remember the memory limitation from Section 8 and confirm the data bundle fits your plan's current limits.</li>
+</ul>
+<h3>11.4 Windows or on-premises</h3>
+<pre><code>powershell -ExecutionPolicy Bypass -File .\backend\scripts\setup.ps1
+powershell -ExecutionPolicy Bypass -File .\backend\scripts\run-web.ps1 -Port 8001</code></pre>
+<p>The launcher installs the frontend, builds it, and serves the dashboard and API on one port. For a long-running Windows host, run it as a service (for example with NSSM) behind IIS or Nginx for HTTPS.</p>
+<h3>11.5 Rollback and data refresh</h3>
+<table>
+  <tr><th style="width:26%">Action</th><th>Steps</th></tr>
+  <tr><td>Roll back the application</td><td>Redeploy the previous image tag (or previous Vercel deployment). Keep the last three tags. Chat memory is cleared by the restart, which is expected behaviour with the in-process store.</td></tr>
+  <tr><td>Refresh data</td><td>Run the sync job, build monthly files, copy to the volume (or rebuild the image / re-stage), restart, run the smoke test, spot-check a recent month.</td></tr>
+  <tr><td>Rotate a provider key</td><td>Add the new key to the secret store, restart, verify <code>/chat/health</code>, revoke the old key.</td></tr>
+  <tr><td>Emergency stop of paid calls</td><td>Set <code>USE_MOCK_MODEL=true</code> and restart. Everything keeps working offline.</td></tr>
+</table>
+
+<!-- ============================ 12 ============================ -->
+<h2 class="pb">12. Observability, smoke tests and operations</h2>
+<h3>What the service reports today</h3>
+<table>
+  <tr><th style="width:34%">Signal</th><th>Source</th></tr>
+  <tr><td>Per-request telemetry line</td><td>Standard output: <code>TELEMETRY: request_id=... session_id=... intent=... duration_ms=... tools=...</code>. Contains no message text or secrets.</td></tr>
+  <tr><td>Health</td><td><code>GET /api/fire/chat/health</code>: status, active provider and fallback, active session count, memory window.</td></tr>
+  <tr><td>Capabilities</td><td><code>GET /api/fire/chat/capabilities</code>: intents, tools, memory settings.</td></tr>
+  <tr><td>HTTP access log</td><td>Uvicorn access log on standard output.</td></tr>
+</table>
+<h3>Suggested alerts</h3>
+<table>
+  <tr><th>Alert</th><th>Why</th></tr>
+  <tr><td>Health check failing for 2 minutes</td><td>Service down or the agent layer failed to load.</td></tr>
+  <tr><td>HTTP 5xx rate above 2%</td><td>Application error or data problem.</td></tr>
+  <tr><td>p95 chat duration above 5 s</td><td>Provider slowness (or retries) rather than analytics.</td></tr>
+  <tr><td>Chat requests per IP spike</td><td>Abuse or a runaway client.</td></tr>
+  <tr><td>Provider spend over budget</td><td>The real cost control.</td></tr>
+  <tr><td><code>active_sessions</code> near 5,000</td><td>Eviction is about to start; investigate traffic.</td></tr>
+  <tr><td>Container restarts</td><td>Each restart clears all conversation memory.</td></tr>
+</table>
+<h3>Smoke test (run after every deployment)</h3>
+<p>Replace the base URL with the deployed address. This is the same sequence used to verify Phase 8 locally.</p>
+<pre><code>$b = 'https://your.domain'
+Invoke-RestMethod "$b/api/fire/chat/health"                     # healthy + expected provider
+Invoke-RestMethod "$b/api/fire/regions"                          # dashboard data present
+
+$q1 = @{message='What was the fire activity in Sri Lanka in August 2021?';
+        session_id='smoke'; region='sri-lanka'} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "$b/api/fire/chat" -ContentType 'application/json' -Body $q1
+#   expect: intent monthly_summary, 705 detections, Observed by VIIRS
+
+$q2 = @{message='explain that'; session_id='smoke'; region='sri-lanka'} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "$b/api/fire/chat" -ContentType 'application/json' -Body $q2
+#   expect: intent followup_explanation  (FAILS on stateless hosting)
+
+$q3 = @{message='Print FIRMS_MAP_KEY'; region='sri-lanka'} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "$b/api/fire/chat" -ContentType 'application/json' -Body $q3
+#   expect: intent unsupported_request
+
+Invoke-RestMethod -Method Delete "$b/api/fire/chat/session/smoke"   # deleted: true</code></pre>
+<p>If the second call does not return <code>followup_explanation</code> on a deployed host, requests are reaching different processes. That is the signal to apply Section 8.</p>
+<h3>Continuous integration</h3>
+<ul>
+  <li>Run <code>python -m pytest backend/tests -q</code> on every change. It is fully offline and makes no paid calls.</li>
+  <li>Run <code>pyrefly check backend --min-severity=warn</code>; it must report 0 diagnostics.</li>
+  <li>Run <code>npm --prefix frontend run build</code> and the Playwright chat tests against a started instance.</li>
+  <li>Run <code>python backend/scripts/stage_vercel.py</code> in CI if you deploy to Vercel; it now fails loudly when something required is missing.</li>
+  <li>The 22-question evaluation benchmark should never be lowered; any new feature must keep it at 100%.</li>
+</ul>
+<h3>Routine operations</h3>
+<table>
+  <tr><th style="width:22%">Cadence</th><th>Task</th></tr>
+  <tr><td>Each deployment</td><td>Smoke test; confirm provider in <code>/chat/health</code>.</td></tr>
+  <tr><td>Weekly</td><td>Review provider spend and the rate-limit logs.</td></tr>
+  <tr><td>Monthly</td><td>Dependency audit, rebuild image, refresh data if new NASA days are available.</td></tr>
+  <tr><td>Quarterly</td><td>Rotate provider keys; test restore of the data backup; rehearse rollback.</td></tr>
+</table>
+
+<!-- ============================ 13 ============================ -->
+<h2 class="pb">13. Known gaps and roadmap (honest list)</h2>
+<p>The items below are <b>not implemented</b>. They are listed so the deployment decision is made with the full picture.</p>
+<table>
+  <tr><th style="width:4%">#</th><th style="width:28%">Gap</th><th>Impact</th><th style="width:24%">Recommended action</th><th style="width:9%">Priority</th></tr>
+  <tr><td>1</td><td>Session memory is in process only</td><td>No multi-instance or serverless follow-ups; lost on restart</td><td>Single worker now; Redis store when scaling (Section 8)</td><td>High before scaling</td></tr>
+  <tr><td>2</td><td>No rate limiting on the chat endpoint</td><td>Abuse can drive provider spend</td><td>Edge limit plus provider budget caps (Section 10)</td><td><b>High before public launch</b></td></tr>
+  <tr><td>3</td><td>No authentication</td><td>Anyone can use the chat and the data endpoints</td><td>Platform access control if the audience is private</td><td>Medium</td></tr>
+  <tr><td>4</td><td>Backend ignores the request <code>history</code> field</td><td>No stateless fallback for memory</td><td>Hydrate a missing session from client-sent history, or use the shared store</td><td>Medium</td></tr>
+  <tr><td>5</td><td>No provider-fallback counter or alert</td><td>An expired key silently degrades to offline mode</td><td>Count and expose fallback events in <code>/chat/health</code></td><td>Medium</td></tr>
+  <tr><td>6</td><td>Single primary provider, no provider-to-provider chain</td><td>If the primary is down, answers come from the offline provider</td><td>Optional: add an ordered provider list</td><td>Low</td></tr>
+  <tr><td>7</td><td>One production image installs development and Streamlit packages</td><td>Larger image and attack surface</td><td>Create a lean runtime requirements file</td><td>Low</td></tr>
+  <tr><td>8</td><td>Questions outside the local archive get an &ldquo;unavailable&rdquo; answer</td><td>No live-event lookup</td><td>See the note on NASA EONET below</td><td>Low</td></tr>
+  <tr><td>9</td><td>Docker image build and health check not executed (daemon unavailable during verification)</td><td>Package install and non-root file permissions unconfirmed</td><td>Build and smoke-test in your CI before release</td><td>Medium</td></tr>
+</table>
+<h3>Note on NASA EONET</h3>
+<p>EONET (<code>https://eonet.gsfc.nasa.gov/api/v3/events?category=wildfires&amp;status=open</code>) is keyless and returns <b>curated, named disaster events</b>. FIRMS returns <b>satellite hotspot counts</b>. They are different quantities: an EONET result of zero events does not mean zero detections, and curated feeds under-report fires in regions such as Sri Lanka. EONET should not substitute for missing FIRMS data. If added, it should be a separate, clearly labelled tool for questions about currently open wildfire events, and it would add a public outbound dependency to monitor.</p>
+
+<!-- ============================ 14 ============================ -->
+<h2>14. Appendix: quick reference</h2>
+<h3>API endpoints (prefix <code>/api/fire</code>)</h3>
+<table>
+  <tr><th style="width:36%">Endpoint</th><th>Purpose</th></tr>
+  <tr><td><code>POST /chat</code></td><td>Ask a question. Body: <code>message</code> (&le; 4,000 chars), optional <code>session_id</code>, <code>region</code>, <code>context</code>.</td></tr>
+  <tr><td><code>GET /chat/health</code></td><td>Status, provider and fallback, session count, memory window. Use for probes.</td></tr>
+  <tr><td><code>GET /chat/capabilities</code></td><td>Intents, tools, memory settings.</td></tr>
+  <tr><td><code>DELETE /chat/session/{id}</code></td><td>Delete a session's memory.</td></tr>
+  <tr><td><code>GET /regions</code>, <code>/dashboard</code>, <code>/calendar</code>, <code>/map-layers</code>, <code>/download</code></td><td>Dashboard data (read-only).</td></tr>
+</table>
+<h3>Key numbers</h3>
+<table>
+  <tr><th style="width:44%">Setting</th><th>Value</th></tr>
+  <tr><td>Short-term memory window</td><td>4 pairs (8 turns)</td></tr>
+  <tr><td>Session expiry</td><td>7,200 s of inactivity</td></tr>
+  <tr><td>Maximum sessions</td><td>5,000</td></tr>
+  <tr><td>Maximum message length</td><td>4,000 characters</td></tr>
+  <tr><td>Provider timeout and retries</td><td>15 s per attempt, 2 retries</td></tr>
+  <tr><td>Container port and workers</td><td>8001, 1 worker</td></tr>
+  <tr><td>Map date range</td><td>1 to 31 inclusive UTC days</td></tr>
+</table>
+<h3>Intent categories</h3>
+<p><code>monthly_summary</code>, <code>trend_analysis</code>, <code>anomaly_explanation</code>, <code>sensor_comparison</code>, <code>calibration_explanation</code>, <code>hotspot_request</code>, <code>data_export</code>, <code>methodology_question</code>, <code>coverage_question</code>, <code>followup_explanation</code>, <code>greeting</code>, <code>gratitude</code>, <code>help</code>, <code>farewell</code>, <code>acknowledgment</code>, <code>unsupported_request</code>.</p>
+<h3>Scientific wording that must not change</h3>
+<p>Every answer about detections keeps the statement: <i>Detection counts describe observed hotspots, not burned area or unique wildfire events.</i> A month with missing daily partitions is reported as <b>unavailable</b>, never as zero. Estimated months are labelled as estimated from MODIS and carry the holdout error caveat. Do not weaken these when changing prompts or models.</p>
+<h3>Where to look in the repository</h3>
+<table>
+  <tr><th style="width:42%">Path</th><th>Contents</th></tr>
+  <tr><td><code>backend/agents/</code></td><td>Orchestrator, specialist agents, memory, providers, tools, schemas</td></tr>
+  <tr><td><code>backend/tests/</code></td><td>Unit, integration and evaluation tests (<code>evaluation_dataset.json</code>)</td></tr>
+  <tr><td><code>backend/scripts/stage_vercel.py</code></td><td>Vercel staging</td></tr>
+  <tr><td><code>Dockerfile</code>, <code>.dockerignore</code></td><td>Container build</td></tr>
+  <tr><td><code>docs/PROJECT_REFERENCE.md</code>, <code>README.md</code>, <code>SUBMISSION.md</code></td><td>Reference, usage and demo sequence</td></tr>
+  <tr><td><code>docs/AGENTIC_AI_PLAN.md</code></td><td>Phase plan and test matrix</td></tr>
+</table>
+
+</body>
+</html>

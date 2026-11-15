@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from backend import chat, main
 from backend.fire import workspace
@@ -37,7 +38,6 @@ def provider_mock(monkeypatch, *contents):
     provider = Mock(side_effect=responses)
     monkeypatch.setattr(chat.requests, "post", provider)
     return provider
-
 
 def test_oldest_uses_product_daily_coverage_without_monthly_table(monkeypatch, archive):
     modis = archive / "processed" / "MODIS_SP"
@@ -103,7 +103,7 @@ def test_frp_uses_per_detection_mean_and_reports_partial_cover(monkeypatch, arch
     plan = {"lookups": [{"kind": "frp", "products": ["MODIS_SP"],
                          "start_month": "2024-02", "end_month": "2024-02"}]}
     provider = provider_mock(monkeypatch, json.dumps(plan), "The mean was 10 MW per detection.")
-    result = main.chat(chat.ChatRequest(question="What was the mean MODIS FRP in Feb 2024?"))
+    result = main.chat(chat.ChatRequest(question="Using the available days, how much MODIS FRP was recorded per detection on average in Feb 2024?"))
 
     evidence = json.loads(provider.call_args.kwargs["json"]["messages"][-1]["content"])["evidence"][0]
     assert (evidence["mean"], evidence["minimum"], evidence["maximum"], evidence["detections_with_frp"]) == (10, 0, 24, 3)
@@ -142,3 +142,27 @@ def test_invalid_lookup_is_rejected_before_retrieval(monkeypatch, archive):
     assert error.value.status_code == 502
     fetch.assert_not_called()
     provider.assert_called_once()
+
+
+def test_dashboard_agent_uses_archive_coverage_and_mean(monkeypatch, archive, frame):
+    modis = archive / "processed" / "MODIS_SP"
+    modis.mkdir(parents=True)
+    (modis / "2000-11-17.parquet").touch()
+    pd.DataFrame({"frp": [6.0, 24.0]}).to_parquet(modis / "2024-02-01.parquet")
+    monkeypatch.setattr(main, "calendar_table", lambda region: frame)
+    monkeypatch.setattr("backend.agents.service.explain", lambda request, session, response, evidence: response)
+    cases = [
+        ("What is the oldest data available in the MODIS dataset?", "2000-11-17 UTC", "2000-11-17"),
+        ("What's the mean monthly fire detections for MODIS in 2024?", "10.00 detections per UTC month", 10),
+        ("What was the mean MODIS FRP in February 2024?", "15.00 MW per detection", 15),
+    ]
+
+    with TestClient(main.app) as client:
+        for question, text, value in cases:
+            response = client.post("/api/fire/chat", json={"message": question, "session_id": "archive-lookup-test"})
+            assert response.status_code == 200
+            assert text in response.json()["answer"]
+            assert response.json()["evidence"][0]["value"] == value
+        legacy = client.post("/api/fire/chat", json={"question": cases[0][0]})
+        assert legacy.status_code == 200
+        assert legacy.json()["citations"][0]["first"] == "2000-11-17"

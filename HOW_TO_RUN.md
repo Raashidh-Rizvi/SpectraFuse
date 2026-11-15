@@ -45,29 +45,40 @@ Select the existing `spectra-fuse-kbpe` project if you are updating the current 
 
 ## Ask about the dataset
 
-Select a region and open **Ask about the dataset**. These questions work with
-the local archive even when OpenAI is unconfigured.
+Select a region and open the assistant. These questions work with the local
+archive even when OpenAI is unconfigured.
 
 - "What is the oldest data available in the MODIS dataset?"
 - "What is the mean monthly fire detections for MODIS in 2024?"
-
-For broader questions and follow-ups, set `OPENAI_API_KEY` and `OPENAI_MODEL`
-in the project `.env` or the backend environment and restart FastAPI. Choose
-a model that supports Chat Completions and JSON mode. [OpenAI JSON mode documentation](https://developers.openai.com/api/docs/guides/structured-outputs#json-mode)
-
-The model maps the question to lookups. The backend reads the region's archive
-and sends the question, recent chat turns and computed evidence to the model.
-The API key stays on the backend. Configure access controls at the hosting
-layer before enabling a paid API key on a public site.
+- "What was the mean MODIS FRP in February 2024?"
 
 The answer shows the product, retrieved dates and coverage. Coverage dates come
 from downloaded UTC partitions, including days with zero detections. Monthly
 averages include complete months with zero detections and omit missing months.
-Comparisons use months shared by the requested sensors. Ask for anomaly or
-calibration summaries, or try "What was the mean MODIS FRP in February 2024?"
-FRP queries support up to 12 months per lookup and use measurements in megawatts
-per detection from the available daily files. Specify dates in your question
-to limit the lookup independently of the chart's year and sensor filters.
+Comparisons use months shared by the requested sensors.
+
+Set `OPENAI_API_KEY` in the project `.env` or backend environment.
+The assistant uses OpenAI's Responses API for explanations, clarification,
+and cited web search. Set `OPENAI_WEB_MODEL` if your existing
+`OPENAI_MODEL` does not support Responses API web search. With neither model
+variable set, this feature uses `gpt-4o-mini`.
+
+Restart FastAPI and open the dashboard's chat panel. The backend sends the
+question, recent turns and relevant archive evidence to OpenAI. Keep the
+API key on the backend and configure access controls before enabling a
+paid API key on a public site.
+
+Try asking “Compare MODIS and VIIRS S-NPP in 2024 using matched months,
+and explain the coverage.” For web search, try “Look up NASA FIRMS
+documentation and explain why a detection count differs from a fire count.”
+If the OpenAI key is missing or the request fails, the archive agent
+provides its existing answer.
+
+The original dataset chat API also accepts a `question` request at
+`POST /api/fire/chat`. For broader questions in this format, set `OPENAI_MODEL`
+to a model that supports Chat Completions and JSON mode. It maps the question
+to validated archive lookups, including fire radiative power statistics in
+megawatts per detection for an explicit period of up to 12 months.
 
 To ingest a period from NASA FIRMS, set `FIRMS_MAP_KEY` and run:
 

@@ -8,6 +8,7 @@ import time
 from datetime import date, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import quote
 
 import pandas as pd
@@ -80,7 +81,7 @@ def normalize(payload, source, day, area):
              & data.acq_date.eq(str(day)) & time & stamp.notna() & valid_confidence
              & data.satellite.str.strip().ne("") & data.daynight.isin(["D", "N"]))
     if not valid.fillna(False).all():
-        raise ValueError(f"{source} {day}: {int((~valid.fillna(False)).sum())} invalid rows.")
+        raise ValueError(f"{source} {day}: {(~valid.fillna(False)).sum()} invalid rows.")
     for column in ("version", "scan", "track", "brightness", "bright_ti4", "bright_ti5", "bright_t31", "type"):
         if column in frame:
             data[column] = frame[column] if column in ("version", "type") else pd.to_numeric(frame[column], errors="coerce")
@@ -133,15 +134,15 @@ def sync(area, start, end, sources=SOURCES):
     if not key:
         raise ValueError("Set FIRMS_MAP_KEY in the project .env file.")
     with requests.Session() as session:
-        session.mount("https://", HTTPAdapter(max_retries=Retry(
-            total=4, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])))
+        session.mount("https://", HTTPAdapter(max_retries=cast(Any, Retry(
+            total=4, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]))))
         key = quote(key, safe="")
         try:
-            availability = pd.concat([pd.read_csv(BytesIO(get(session, f"/data_availability/csv/{key}/{source}")))
+            availability = pd.concat([pd.read_csv(BytesIO(get(session, f"/data_availability/csv/{key}/{source}") or b""))
                                       for source in sources]).drop_duplicates()
             coverage = availability.set_index("data_id")
-            windows = [(source, date.fromisoformat(coverage.loc[source, "min_date"]),
-                        date.fromisoformat(coverage.loc[source, "max_date"])) for source in sources]
+            windows = [(source, date.fromisoformat(str(coverage.loc[source, "min_date"])),
+                        date.fromisoformat(str(coverage.loc[source, "max_date"]))) for source in sources]
         except (KeyError, TypeError, pd.errors.ParserError) as error:
             raise ValueError("Unexpected FIRMS availability response. Check your MAP_KEY.") from None
         for source, first, last in windows:
@@ -166,7 +167,7 @@ def sync(area, start, end, sources=SOURCES):
                 span = (last - first).days + 1
                 print(f"{source} {first} through {last}", flush=True)
                 payload = get(session, f"/area/csv/{key}/{source}/{area}/{span}/{first}")
-                reader = csv.reader(StringIO(payload.decode("utf-8-sig")), strict=True)
+                reader = csv.reader(StringIO(payload.decode("utf-8-sig") if payload else ""), strict=True)
                 header = next(reader, [])
                 if set(COLUMNS) - set(header):
                     raise ValueError("FIRMS response is missing expected CSV columns.")
@@ -199,36 +200,39 @@ def calibration_factor(training):
     return None
 
 
-def monthly(area, bounds=None):
+def monthly(area, bounds=None, point_filter=None, *, include_noaa=False):
     root = workspace(area)
     records = []
-    for source in SOURCES:
+    products = PRODUCTS if include_noaa else SOURCES
+    for source in products:
         counts = {}
         for path in sorted((root / "processed" / source).glob("*.parquet")):
             month = path.stem[:7]
             days, count = counts.get(month, (0, 0))
-            if bounds is None:
+            if bounds is None and point_filter is None:
                 import pyarrow.parquet as pq
                 size = pq.ParquetFile(path).metadata.num_rows
             else:
-                west, south, east, north = bounds
                 points = pd.read_parquet(path, columns=["latitude", "longitude"])
-                size = int((points.latitude.between(south, north)
-                            & points.longitude.between(west, east)).sum())
+                if bounds is not None:
+                    west, south, east, north = bounds
+                    points = points[points.latitude.between(south, north)
+                                    & points.longitude.between(west, east)]
+                size = len(point_filter(points) if point_filter is not None else points)
             counts[month] = days + 1, count + size
         for month, (days, count) in counts.items():
             year, number = map(int, month.split("-"))
             if days == calendar.monthrange(year, number)[1]:
                 records.append((month, source, count))
     if not records:
-        return pd.DataFrame(columns=[*SOURCES, "harmonized", "origin"]), {}
+        return pd.DataFrame(columns=[*products, "harmonized", "origin"]), {}
     table = pd.DataFrame(records, columns=["month", "source", "count"]).pivot(
-        index="month", columns="source", values="count").reindex(columns=list(SOURCES))
+        index="month", columns="source", values="count").reindex(columns=list(products))
     table = table.reindex(pd.period_range(table.index.min(), table.index.max(), freq="M").astype(str))
     table.index.name = "month"
     training, heldout = calibration_split(table)
-    metrics = {"paired_months": len(training) + len(heldout), "training_months": len(training),
-               "holdout_months": len(heldout)}
+    metrics: dict[str, Any] = {"paired_months": len(training) + len(heldout), "training_months": len(training),
+                                "holdout_months": len(heldout)}
     modis, viirs = SOURCES
     factor = calibration_factor(training)
     if factor is not None:

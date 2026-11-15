@@ -1,11 +1,12 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity, CalendarDays, Download, Flame, Layers, MapPin, Maximize2, Minimize2, Moon, Orbit, Sun} from 'lucide-react';
+import {Activity, Bot, CalendarDays, Download, Flame, Layers, MapPin, Maximize2, Minimize2, Moon, Orbit, Sun} from 'lucide-react';
 import {Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
-import DatasetChat from './DatasetChat';
+import {ChatProvider, useChat} from './context/ChatContext';
+import ChatPanel from './components/chat/ChatPanel';
 
 const base = (import.meta.env.VITE_API_BASE_URL || '/api/fire').replace(/\/+$/, '');
 const modis = 'MODIS_SP', viirs = 'VIIRS_SNPP_SP', noaa = 'VIIRS_NOAA20_SP';
@@ -32,13 +33,45 @@ const primaryLayers = [modis, viirs, 'harmonized'];
 const comparisonLayers = [...primaryLayers, noaa];
 const defaultExtent = '79.5,5.8,82,10';
 
-function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex}) {
+const osmAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+function createImageryLayer(options) {
+  return L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Imagery &copy; <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9">Esri and imagery providers</a>',
+    maxNativeZoom: 19,
+    maxZoom: 19,
+    ...options,
+  });
+}
+
+function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex, locateTrigger}) {
   const element = useRef(null);
   const map = useRef(null);
   useEffect(() => {
     const view = L.map(element.current, {scrollWheelZoom:true}).setView([7.8,80.7],7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution:'Â© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: osmAttribution,
+      maxZoom: 19,
+    }).addTo(view);
+    const terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      attribution: osmAttribution + ', SRTM | &copy; <a href="https://opentopomap.org/about">OpenTopoMap (CC BY-SA)</a>',
+      maxNativeZoom: 17,
+      maxZoom: 19,
+    });
+    const satellite = createImageryLayer();
+    const terrainSatellite = L.layerGroup([
+      L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Hillshade &copy; Esri, Airbus DS, USGS, NGA, NASA, CGIAR, GEBCO and N Robinson',
+        maxNativeZoom: 16,
+        maxZoom: 19,
+      }),
+      createImageryLayer({opacity: .78}),
+    ]);
+    L.control.layers({
+      'Street (OpenStreetMap)': street,
+      'Terrain': terrain,
+      'Satellite': satellite,
+      'Terrain + Satellite': terrainSatellite,
     }).addTo(view);
     map.current = view;
     const observer = new ResizeObserver(() => view.invalidateSize());
@@ -67,10 +100,15 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
     return () => group.remove();
   }, [layers,enabled]);
   useEffect(() => {
+    if (!map.current || !extent) return;
+    map.current.invalidateSize();
     const [w,s,e,n] = extent.split(",").map(Number);
-    if ([w,s,e,n].every(Number.isFinite) && w >= -180 && w < e && e <= 180 && s >= -90 && s < n && n <= 90) map.current.fitBounds([[s,w],[n,e]]);
-    else if (extent === 'world') map.current.setView([0,0],2);
-  }, [extent]);
+    if ([w,s,e,n].every(Number.isFinite) && w >= -180 && w < e && e <= 180 && s >= -90 && s < n && n <= 90) {
+      map.current.fitBounds([[s,w],[n,e]], { padding: [15, 15], maxZoom: 11, animate: true });
+    } else if (extent === 'world') {
+      map.current.setView([0,0],2);
+    }
+  }, [extent, locateTrigger]);
   useEffect(() => {
     if (!place) return;
     const position = [place.lat, place.lon];
@@ -88,7 +126,7 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
     return () => map.current.off('click', add);
   }, [drawing,onVertex]);
   useEffect(() => {
-    const shape = L.polygon(vertices.map(([x,y]) => [y,x]), {color:'#864dff'}).addTo(map.current);
+    const shape = L.polygon(vertices.map(([x,y]) => [y,x]), {color:'#864dff',interactive:false}).addTo(map.current);
     return () => shape.remove();
   }, [vertices]);
   return <div className="mapwrap"><div ref={element} className="map" aria-label="Map of recorded fire detections"/>
@@ -140,6 +178,39 @@ function PlaceSearch({onSelect}) {
   </div>;
 }
 
+function AssistantHeaderButton() {
+  const { openChat, isOpen } = useChat();
+  return (
+    <button
+      className="button ai-assistant-header-btn"
+      type="button"
+      aria-label="Open AI Assistant"
+      aria-expanded={isOpen}
+      onClick={openChat}
+    >
+      <Bot size={16} />
+      <span>AI Assistant</span>
+    </button>
+  );
+}
+
+function AssistantFloatingPill() {
+  const { openChat, isOpen } = useChat();
+  if (isOpen) return null;
+  return (
+    <button
+      className="chat-floating-button"
+      type="button"
+      aria-label="Open Satellite Fire AI Assistant"
+      onClick={openChat}
+    >
+      <Flame size={18} />
+      <span>Ask AI Assistant</span>
+      <span className="pulse-dot" aria-hidden="true" />
+    </button>
+  );
+}
+
 function App() {
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('firescope-theme');
@@ -163,7 +234,7 @@ function App() {
   const [year,setYear] = useState('all'), [measure,setMeasure] = useState('harmonized');
   const [drawing,setDrawing] = useState(false);
   const [vertices,setVertices] = useState([]);
-  const [polygon,setPolygon] = useState('');
+  const polygon = vertices.length >= 3 ? vertices.map(pair=>pair.join(',')).join(';') : '';
   const polygonQuery = polygon ? '&polygon='+encodeURIComponent(polygon) : '';
   const [selected,setSelected] = useState(''), [sensor,setSensor] = useState(viirs);
   const [place, setPlace] = useState(null);
@@ -190,6 +261,27 @@ function App() {
   const defaults = {start:selected+'-01',end:selected+'-'+monthEnd,bbox:extent};
   const activeFilter = filter?.month === selected && filter.region === region ? filter : defaults;
   const [mapResult,setMap] = useState(null), [error,setError] = useState(''), [mapError,setMapError] = useState('');
+  function updateMapFilters(form) {
+    const values = new FormData(form);
+    const start = values.get('start'), end = values.get('end');
+    const bbox = values.get('bbox').trim();
+    const days = (Date.parse(end) - Date.parse(start)) / 86400000 + 1;
+    const bounds = bbox.split(',').map(value => value.trim() ? Number(value) : NaN);
+    const [w,s,e,n] = bounds;
+    const [rw,rs,re,rn] = (extent === 'world' ? '-180,-90,180,90' : extent).split(',').map(Number);
+    if (!Number.isFinite(days) || days < 1 || days > 31) {
+      setFilterError('Choose an end date on or after the start date, within 31 days.');
+      return;
+    }
+    if (bbox !== 'world' || extent !== 'world') {
+      if (bounds.length !== 4 || !(rw <= w && w < e && e <= re && rs <= s && s < n && n <= rn)) {
+        setFilterError('Enter west,south,east,north within the downloaded region.');
+        return;
+      }
+    }
+    setFilterError('');
+    setFilter({region,month:selected,start,end,bbox});
+  }
   const mapPath = '/map-layers?'+query+polygonQuery+'&'+new URLSearchParams({
     start:activeFilter.start,end:activeFilter.end,bbox:activeFilter.bbox
   });
@@ -197,7 +289,7 @@ function App() {
   const [percent,setPercent] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    setPolygon(''); setVertices([]); setDrawing(false); setFilterError(''); setError(''); setRows([]); setSelected(''); setYear('all'); setPeriod({start:'',end:''}); setPeriodError('');
+    setVertices([]); setDrawing(false); setFilterError(''); setError(''); setRows([]); setSelected(''); setYear('all'); setPeriod({start:'',end:''}); setPeriodError('');
     Promise.all([get('/dashboard?'+query,controller.signal),get('/sensor-comparison?'+query,controller.signal)])
       .then(([data,comparison]) => {
         setRows(data); setMetrics(comparison.metrics);
@@ -215,13 +307,32 @@ function App() {
       .catch(err => {if (!controller.signal.aborted) setMapError(err.message);});
     return () => controller.abort();
   }, [selected,mapPath]);
+  const calendarPath = polygon ? '/polygon-calendar?'+query+polygonQuery : '';
+  const [polygonCalendar,setPolygonCalendar] = useState(null);
+  useEffect(() => {
+    setPolygonCalendar(null);
+    if (!calendarPath) return;
+    const controller = new AbortController();
+    get(calendarPath,controller.signal)
+      .then(data => {
+        if (!controller.signal.aborted) setPolygonCalendar({path:calendarPath,data});
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) setPolygonCalendar({path:calendarPath,error:err.message});
+      });
+    return () => controller.abort();
+  }, [calendarPath]);
+  const calendarResult = polygonCalendar?.path === calendarPath ? polygonCalendar : null;
+  const calendarLoading = Boolean(calendarPath && !calendarResult);
   const [period,setPeriod] = useState({start:'',end:''});
   const [compareTrends,setCompareTrends] = useState(false);
   const [periodError,setPeriodError] = useState('');
   const years = [...new Set(rows.map(row => row.month.slice(0,4)))];
-  const visible = rows.filter(row => (year === 'all' || row.month.startsWith(year))
+  const inSelectedPeriod = row => (year === 'all' || row.month.startsWith(year))
     && (!period.start || row.month >= period.start)
-    && (!period.end || row.month <= period.end));
+    && (!period.end || row.month <= period.end);
+  const visible = rows.filter(inSelectedPeriod);
+  const calendarRows = calendarPath ? (calendarResult?.data ?? []).filter(inSelectedPeriod) : visible;
   useEffect(() => {
     if (visible.length && !visible.some(row => row.month === selected)) {
       setSelected(visible.at(-1).month);
@@ -233,22 +344,94 @@ function App() {
   const peak = active.reduce((top,row) => !top || row[measure] > top[measure] ? row : top,null);
   const noaaMonths = rows.filter(row => row[noaa] != null).length;
   const anomalyKey = measure + '_anomaly';
-  const maximum = Math.max(1,...visible.map(row => percent ? Math.abs(row[anomalyKey] ?? 0) : row[measure] ?? 0));
+  const maximum = Math.max(1,...calendarRows.map(row => percent ? Math.abs(row[anomalyKey] ?? 0) : row[measure] ?? 0));
   const chart = visible;
+  const trendColors = theme === 'dark'
+    ? {[modis]:'#ff9caf', [viirs]:'#ffd08a', harmonized:'#b3f5ff', [noaa]:'#f6b2e1'}
+    : {[modis]:'#a11535', [viirs]:'#914000', harmonized:'#124ca7', [noaa]:'#8b185f'};
+  const trendGrid = theme === 'dark' ? '#e2ebff40' : '#23345d38';
   const errorMetric = metrics.find(row => row.Method === 'Calibrated MODIS');
-  return <main>
-    <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
-      <div className="header-actions"><button className="button theme-button" type="button"
-        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-        {theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}
-      </button><a className="button" href={base+'/download?'+query+(year==='all' ? '' : '&year='+year)}><Download size={16}/> Monthly CSV</a></div></header>
+  const [locateTrigger, setLocateTrigger] = useState(0);
+
+  const handleDispatchAction = useCallback((action) => {
+    if (!action || !action.type) return;
+    const payload = action.payload || {};
+
+    if (action.type === 'show_on_map') {
+      const targetRegion = payload.region || region;
+      const targetBbox = payload.bbox || (regionInfo?.area ?? defaultExtent);
+
+      if (payload.region && payload.region !== region) {
+        setRegion(payload.region);
+      }
+      if (payload.start && payload.end) {
+        const targetMonth = payload.start.slice(0, 7);
+        const targetYear = targetMonth.slice(0, 4);
+
+        // Ensure visible list includes this month so year filter doesn't overwrite selected
+        setYear(prev => (prev !== 'all' && prev !== targetYear ? 'all' : prev));
+        setPeriod({ start: '', end: '' });
+        setSelected(targetMonth);
+
+        setFilter({
+          region: targetRegion,
+          month: targetMonth,
+          start: payload.start,
+          end: payload.end,
+          bbox: targetBbox,
+        });
+      }
+      if (payload.layers && Array.isArray(payload.layers) && payload.layers.length > 0) {
+        setEnabled(previous => [...new Set([...previous, ...payload.layers])]);
+      }
+
+      // Re-center / fitBounds on map
+      setLocateTrigger(prev => prev + 1);
+
+      // Smooth scroll viewport to the Detection Map and pulse highlight
+      setTimeout(() => {
+        const mapSection = document.querySelector('.geo');
+        if (mapSection) {
+          mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          mapSection.classList.add('map-highlight-pulse');
+          setTimeout(() => mapSection.classList.remove('map-highlight-pulse'), 2500);
+        }
+      }, 150);
+    } else if (action.type === 'apply_filters') {
+      if (payload.region) setRegion(payload.region);
+      if (payload.year) setYear(payload.year);
+      if (payload.measure) setMeasure(payload.measure);
+    } else if (action.type === 'open_monthly_trend') {
+      if (payload.month) setSelected(payload.month);
+    }
+  }, [region, regionInfo, extent]);
+
+  return (
+    <ChatProvider
+      base={base}
+      currentRegion={region}
+      currentYear={year}
+      currentMeasure={measure}
+      currentExtent={activeFilter.bbox || extent}
+      onDispatchAction={handleDispatchAction}
+    >
+      <main>
+        <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
+          <div className="header-actions">
+            <AssistantHeaderButton />
+            <button className="button theme-button" type="button"
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}
+            </button>
+            <a className="button" href={base+'/download?'+query+(year==='all' ? '' : '&year='+year)}><Download size={16}/> Monthly CSV</a>
+          </div>
+        </header>
     <section className="intro"><div><p className="location"><MapPin size={15}/> {regionInfo?.label ?? 'Sri Lanka'}</p><h1>Burning activity</h1><p>NASA FIRMS Â· Standard Processing Â· UTC</p></div>
       <div className="filters"><label><span>Region</span><select value={region} onChange={e=>setRegion(e.target.value)}>
       {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
       <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
     </section>
-    <DatasetChat key={region} base={base} region={region} label={regionInfo?.label ?? region}/>
     {!!rows.length && <form className="map-filters" key={region+period.start+period.end} onSubmit={event=>{
       event.preventDefault();
       const values = new FormData(event.currentTarget);
@@ -282,11 +465,14 @@ function App() {
         <label className="toggle"><input type="checkbox" checked={compareTrends}
           onChange={event=>setCompareTrends(event.target.checked)}/> Compare sensor trends</label>
         <div className="chart"><ResponsiveContainer><AreaChart data={chart} margin={{left:1,right:13,top:10,bottom:0}}>
-          <CartesianGrid vertical={false} stroke="#c5d1ff35"/><XAxis dataKey="month" tick={{fill:'var(--chart-label)',fontSize:11}} minTickGap={28}/><YAxis width={49} tick={{fill:'var(--chart-label)',fontSize:11}}/>
-          <Tooltip contentStyle={{background:'#1b2450',border:'1px solid #8ba0dd',borderRadius:10}} formatter={(value,name)=>[format(value),name]}/>
+          <CartesianGrid vertical={false} stroke={trendGrid}/><XAxis dataKey="month" tick={{fill:'var(--chart-label)',fontSize:11}} minTickGap={28}/><YAxis width={49} tick={{fill:'var(--chart-label)',fontSize:11}}/>
+          <Tooltip contentStyle={{background:theme === 'dark' ? '#17213d' : '#fff',border:'1px solid #8ba0dd',borderRadius:10,color:'var(--chart-label)'}}
+            cursor={{stroke:trendGrid}} formatter={(value,name)=>[format(value),name]}/>
           <Legend/>
           {(compareTrends ? primaryLayers : [measure]).map(key=><Area key={key} type="linear" dataKey={key} name={names[key]}
-            stroke={sensorColors[key].fill} strokeWidth={2} strokeDasharray={key==='harmonized'?'5 3':undefined} fill="none"/>)}
+            stroke={trendColors[key]} strokeWidth={3} strokeDasharray={key==='harmonized'?'6 3':undefined}
+            fill={trendColors[key]} fillOpacity={compareTrends ? 0 : .12}
+            dot={{r:3, fill:trendColors[key], strokeWidth:0}}/>)}
         </AreaChart></ResponsiveContainer></div>
       </section>
       <section className="panel compare dark"><h2>Sensor comparison</h2><p>{selected || 'Select a month'}</p><div className="chart"><ResponsiveContainer><BarChart data={comparisonLayers.map(key=>({name:names[key],count:selectedRow?.[key]}))}>
@@ -295,11 +481,14 @@ function App() {
         </Bar>
         </BarChart></ResponsiveContainer></div>{selectedRow?.estimate_low != null && <p>Estimated from MODIS · empirical error range {format(selectedRow.estimate_low)}–{format(selectedRow.estimate_high)}</p>}
         <small>Held-out monthly MAE: {format(errorMetric?.MAE)} detections</small></section>
-      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
-        <div className="calendar-scroll"><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
-          {[...new Set(visible.map(row=>row.month.slice(0,4)))].map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
+      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]}{polygon ? ' · Selected polygon' : ''} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
+        {calendarLoading && <p role="status">Updating calendar for the selected polygon…</p>}
+        {calendarResult?.error && <p role="alert">{calendarResult.error}</p>}
+        {calendarResult?.data && !calendarRows.length && <p role="status">No monthly data for the selected period.</p>}
+        <div className="calendar-scroll" aria-busy={calendarLoading}><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
+          {[...new Set(calendarRows.map(row=>row.month.slice(0,4)))].map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
             const key=value+'-'+String(index+1).padStart(2,'0');
-            const item=visible.find(row=>row.month===key);
+            const item=calendarRows.find(row=>row.month===key);
             const n=percent?item?.[anomalyKey]:item?.[measure];
             const intensity=n==null?0:Math.min(1,Math.abs(n)/maximum);
             const color=n==null?'#17204455':`hsl(0 ${n<0?35:78}% ${43-19*intensity}%)`;
@@ -319,38 +508,26 @@ function App() {
           <div id="detection-map-controls" hidden={mapExpanded && controlsCollapsed}>
           <div className="sectionhead"><div><h2>Detection map</h2>
         <p>{activeFilter.start} to {activeFilter.end} · {map?.provenance ?? 'NASA FIRMS Standard Processing'}</p></div>
+        <div className="map-heading-actions">
         <label><span>Map product</span><select value={sensor} onChange={e=>{
           setSensor(e.target.value);
           setEnabled(previous=>[...new Set([...previous,e.target.value])]);
-        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label></div>
+        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label>
         <button type="button" className="button map-expand" aria-pressed={mapExpanded}
+          aria-label="Fullscreen map" title={mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
           onClick={() => setMapExpanded(value => !value)}>
           {mapExpanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}
-          {mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
         </button>
+        </div></div>
         <PlaceSearch onSelect={setPlace}/>
-        <form className="map-filters" key={region+selected+extent} onSubmit={event=>{
-          event.preventDefault();
-          const values = new FormData(event.currentTarget);
-          const start = values.get('start'), end = values.get('end');
-          const bbox = values.get('bbox').trim();
-          const days = (Date.parse(end) - Date.parse(start)) / 86400000 + 1;
-          const bounds = bbox.split(',').map(value => value.trim() ? Number(value) : NaN);
-          const [w,s,e,n] = bounds;
-          const [rw,rs,re,rn] = (extent === 'world' ? '-180,-90,180,90' : extent).split(',').map(Number);
-          if (days < 1 || days > 31) {
-            setFilterError('Choose an end date on or after the start date, within 31 days.');
-            return;
-          }
-          if (bbox !== 'world' || extent !== 'world') {
-            if (bounds.length !== 4 || !(rw <= w && w < e && e <= re && rs <= s && s < n && n <= rn)) {
-              setFilterError('Enter west,south,east,north within the downloaded region.');
-              return;
-            }
-          }
-          setFilterError('');
-          setFilter({region,month:selected,start,end,bbox});
-        }} onChange={()=>setFilterError('')}>
+        <form className="map-filters" key={region+selected+locateTrigger} onSubmit={event=>event.preventDefault()}
+          onChange={event=>{
+            if (event.target.name === 'bbox') setFilterError('');
+            else updateMapFilters(event.currentTarget);
+          }}
+          onBlur={event=>{
+            if (event.target.name === 'bbox') updateMapFilters(event.currentTarget);
+          }}>
           <label>Start date (UTC)<input name="start" type="date" required defaultValue={activeFilter.start}
             onChange={event=>{
               const start = event.target.value;
@@ -361,20 +538,19 @@ function App() {
             }}/></label>
           <label>End date (UTC)<input name="end" type="date" required defaultValue={activeFilter.end}/></label>
           <label>Bounding box<input name="bbox" required defaultValue={activeFilter.bbox}
-            aria-label="Bounding box west,south,east,north"/></label>
-          <button type="submit" className="button">Apply filters</button>
-        </form>
+            aria-label="Bounding box west,south,east,north"
+            onKeyDown={event=>{if (event.key === 'Enter') event.currentTarget.blur();}}/></label>
         <div className="header-actions">
           <button type="button" className="button" onClick={() => {
-            if (drawing) setPolygon(vertices.map(pair=>pair.join(',')).join(';'));
-            else {setVertices([]);setPolygon('');}
+            if (!drawing) setVertices([]);
             setDrawing(!drawing);
-          }} disabled={drawing&&vertices.length<3}>{drawing?'Apply polygon':'Draw polygon'}</button>
-          {(drawing||polygon) && <button type="button" className="button" onClick={() => {
-            setDrawing(false);setVertices([]);setPolygon('');
+          }}>{drawing?'Stop drawing':'Draw polygon'}</button>
+          {(drawing||vertices.length > 0) && <button type="button" className="button" onClick={() => {
+            setDrawing(false);setVertices([]);
           }}>Clear</button>}
         </div>
-        {drawing && <small>Click at least three points on the map, then apply.</small>}
+        </form>
+        {drawing && <small>Click three points to filter the map and calendar. Keep clicking to extend the area.</small>}
         <div className="sensor-legend" aria-label="Map layers">
           {comparisonLayers.map(key=>{
             const {fill,stroke} = sensorColors[key];
@@ -394,21 +570,26 @@ function App() {
         {map?.layers.harmonized.factor != null && <small>
           MODIS counts scaled by {format(map.layers.harmonized.factor)}. Regional monthly holdout
           90th-percentile absolute error: {format(map.layers.harmonized.monthly_error_p90)} detections.
-          Cell-level uncertainty is unavailable.
+          Cell-level uncertainty is unavailable.{' '}
         </small>}
         {map?.layers.harmonized.status === 'Observed by VIIRS' && <small>
-          Harmonized cells contain observed S-NPP counts. Partition coverage cannot establish satellite coverage.
+          Harmonized cells contain observed S-NPP counts. Partition coverage cannot establish satellite coverage.{' '}
         </small>}
         {selected && sensor !== 'harmonized' && <small><a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download calendar-month detections</a></small>}
           </div>
         </div>
         <DetectionMap layers={map?.layers} enabled={enabled} vertices={vertices} drawing={drawing}
           onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
-          extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}/>
+          extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}
+          locateTrigger={locateTrigger}/>
       </section>
     </div>}
     <footer>NASA FIRMS observations Â· Hotspots can include repeated detections and non-fire thermal sources.</footer>
-  </main>;
+      </main>
+      <AssistantFloatingPill />
+      <ChatPanel onExecuteAction={handleDispatchAction} />
+    </ChatProvider>
+  );
 }
 
 createRoot(document.getElementById('root')).render(<App/>);

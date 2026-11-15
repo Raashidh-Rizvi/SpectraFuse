@@ -12,6 +12,7 @@ try {
         npm run build
         if ($LASTEXITCODE) { throw 'Could not build SpectraFuse.' }
     } finally { Pop-Location }
-    & .\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port $Port
+    $pythonCmd = if (Test-Path .\.venv\Scripts\python.exe) { ".\.venv\Scripts\python.exe" } else { "python" }
+    & $pythonCmd -m uvicorn backend.main:app --host 127.0.0.1 --port $Port
     if ($LASTEXITCODE) { throw 'SpectraFuse API exited with an error.' }
 } finally { Pop-Location }

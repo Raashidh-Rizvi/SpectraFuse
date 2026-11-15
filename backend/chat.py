@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from functools import cache
+from calendar import month_abbr, month_name
 from typing import Literal
 
 import requests
@@ -62,7 +62,7 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     region: str = Field(default="sri-lanka", max_length=100)
     question: str = Field(min_length=1, max_length=2000)
@@ -90,20 +90,32 @@ MEAN = re.compile(
     rf"(?:what(?: is|'?s) (?:the )?)?(?:mean|average) monthly (?:fire )?detections "
     rf"(?:for|in|from|of) (?:the )?({PRODUCT})(?: dataset)?(?: (?:in|for) ([1-9][0-9]{{3}}))?"
 )
+FRP_MEAN = re.compile(
+    rf"(?:what(?: is| was|'?s) (?:the )?)?(?:mean|average) ({RAW_PRODUCT}) (?:frp|fire radiative power) "
+    r"(?:in|for) (?:(?P<month>[a-z]+) (?P<year>[1-9][0-9]{3})|(?P<iso>[1-9][0-9]{3}-(?:0[1-9]|1[0-2])))"
+)
+NAMED_MONTHS = {name.lower(): number for names in (month_name, month_abbr)
+                for number, name in enumerate(names) if number}
 
 
-def basic_lookup(request):
+def basic_lookup(question, *, has_history=False):
     """Answer simple, unambiguous requests without sending them to a model."""
-    question = " ".join(request.question.lower().replace("’", "'").split()).rstrip("?.!")
+    question = " ".join(question.lower().replace("’", "'").split()).rstrip("?.!")
     if match := COVERAGE.fullmatch(question):
         order, product = match.groups()
         return Lookup(kind="coverage", products=[PRODUCT_NAMES[product]]), order
     if match := MEAN.fullmatch(question):
         product, year = match.groups()
-        if year or not request.history:
+        if year or not has_history:
             return Lookup(kind="monthly", products=[PRODUCT_NAMES[product]],
                           start_month=f"{year}-01" if year else None,
                           end_month=f"{year}-12" if year else None), "mean"
+    if match := FRP_MEAN.fullmatch(question):
+        month = match["iso"]
+        if not month and match["month"] in NAMED_MONTHS:
+            month = f"{match['year']}-{NAMED_MONTHS[match['month']]:02d}"
+        if month:
+            return Lookup(kind="frp", products=[PRODUCT_NAMES[match[1]]], start_month=month, end_month=month), "mean_frp"
     return None, None
 
 
@@ -111,6 +123,13 @@ def basic_answer(operation, result):
     reference = result["citation"]
     product = LABELS[reference["product"]]
     first, last = reference["first"], reference["last"]
+    if operation == "mean_frp":
+        month = reference["start_month"]
+        if result["mean"] is None:
+            return f"No {product} FRP measurements are available in {month} for the selected region."
+        return (f"In {month}, {product} averaged {result['mean']:,.2f} MW per detection across "
+                f"{result['detections_with_frp']:,} detections with FRP measurements. "
+                f"The archive covers {reference['available']} of {reference['expected']} UTC days.")
     if operation == "mean":
         if result["mean"] is None:
             return f"{product} has no complete months in the requested period. A monthly mean is unavailable."
@@ -154,10 +173,9 @@ def completion(key, model, prompt, data, *, json_output=False):
     return content.strip()
 
 
-def answer(request, area, load_frame):
-    get_frame = cache(load_frame)
+def answer(request, area, get_frame):
     source = "Synthetic demo" if area == "demo" else "NASA FIRMS Standard Processing"
-    lookup, operation = basic_lookup(request)
+    lookup, operation = basic_lookup(request.question, has_history=bool(request.history))
     if lookup:
         evidence = retrieve(lookup, area, get_frame)
         content = basic_answer(operation, evidence[0])

@@ -1,15 +1,19 @@
 import calendar as cal
 from datetime import date
 from functools import cache
+from typing import Any, cast
 
 import pandas as pd
+import pyarrow.parquet as pq
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.agents.schemas import ChatRequest as AgentChatRequest
 from backend.analytics import evaluate_overlap, historical_anomalies
 from backend.chat import ChatRequest, answer
+from backend.chat_data import Lookup, retrieve
 from backend.fire import (ROOT, PRODUCTS, SOURCES, area_value, calibration_factor,
                           calibration_split, data_directory, monthly, workspace)
 
@@ -108,8 +112,6 @@ def download(region: str = "sri-lanka", year: int | None = None):
 
 
 def noaa_monthly_counts(area):
-    import pyarrow.parquet as pq
-
     source = PRODUCTS[-1]
     files = (workspace(area) / "processed" / source).glob("*.parquet")
     totals = {}
@@ -130,7 +132,7 @@ def dashboard_frame(region):
         frame[name + "_anomaly"] = historical_anomalies(frame[name])["Departure (%)"]
     heldout, metrics = evaluate_overlap(frame)
     if not metrics.empty:
-        radius = metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"]
+        radius = float(cast(Any, metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"]))
         estimated = frame.harmonized.where(frame.origin.eq("Estimated from MODIS"))
         frame["estimate_low"] = (estimated - radius).clip(lower=0)
         frame["estimate_high"] = estimated + radius
@@ -140,6 +142,18 @@ def dashboard_frame(region):
 @app.get("/api/fire/dashboard")
 def dashboard(region: str = "sri-lanka"):
     return records(dashboard_frame(region).reset_index())
+
+
+@app.get("/api/fire/polygon-calendar")
+def polygon_calendar(polygon: str = Query(min_length=1, max_length=4000), region: str = "sri-lanka"):
+    vertices = polygon_vertices(polygon)
+    frame, _ = monthly(resolve(region), point_filter=lambda points: filter_polygon(points, vertices),
+                       include_noaa=True)
+    if frame.empty:
+        return []
+    for name in (*PRODUCTS, "harmonized"):
+        frame[name + "_anomaly"] = historical_anomalies(frame[name])["Departure (%)"]
+    return records(frame.reset_index())
 
 
 @app.get("/api/fire/monthly-hotspots")
@@ -160,25 +174,31 @@ def monthly_hotspots(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
             "expected_days": cal.monthrange(*map(int, month.split("-")))[1], "cells": records(cells)}
 
 
+def polygon_vertices(polygon):
+    import math
+    try:
+        vertices = [tuple(map(float, pair.split(","))) for pair in polygon.split(";")]
+        if not 3 <= len(vertices) <= 100 or not all(
+            len(pair) == 2 and math.isfinite(pair[0]) and math.isfinite(pair[1])
+            and -180 <= pair[0] <= 180 and -90 <= pair[1] <= 90 for pair in vertices
+        ):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(422, "Provide 3 to 100 longitude,latitude vertices.") from None
+    return vertices
+
+
+def filter_polygon(points, vertices):
+    x, y = points.longitude, points.latitude
+    inside = pd.Series(False, index=points.index)
+    for (x1, y1), (x2, y2) in zip(vertices, vertices[1:] + vertices[:1]):
+        if y1 != y2:
+            inside ^= ((y1 > y) != (y2 > y)) & (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)
+    return points[inside]
+
+
 def within_polygon(points, polygon):
-    if polygon:
-        import math
-        try:
-            vertices = [tuple(map(float, pair.split(","))) for pair in polygon.split(";")]
-            if not 3 <= len(vertices) <= 100 or not all(
-                len(pair) == 2 and math.isfinite(pair[0]) and math.isfinite(pair[1])
-                and -180 <= pair[0] <= 180 and -90 <= pair[1] <= 90 for pair in vertices
-            ):
-                raise ValueError
-        except ValueError:
-            raise HTTPException(422, "Provide 3 to 100 longitude,latitude vertices.") from None
-        x, y = points.longitude, points.latitude
-        inside = pd.Series(False, index=points.index)
-        for (x1, y1), (x2, y2) in zip(vertices, vertices[1:] + vertices[:1]):
-            if y1 != y2:
-                inside ^= ((y1 > y) != (y2 > y)) & (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)
-        points = points[inside]
-    return points
+    return filter_polygon(points, polygon_vertices(polygon)) if polygon else points
 
 
 @app.get("/api/fire/map-layers")
@@ -216,8 +236,8 @@ def map_layers(start: date, end: date, region: str = "sri-lanka",
                           "features": records(locations)}
 
     modis, viirs = SOURCES
-    grid = {"features": [], "total": None, "source": None, "days": 0, "status": "Unavailable",
-            "factor": None, "monthly_error_p90": None}
+    grid: dict[str, Any] = {"features": [], "total": None, "source": None, "days": 0, "status": "Unavailable",
+                            "factor": None, "monthly_error_p90": None}
     source, scale = viirs, 1
     if layers[viirs]["days"] != expected:
         source = modis
@@ -227,7 +247,7 @@ def map_layers(start: date, end: date, region: str = "sri-lanka",
             if scale is not None:
                 _, metrics = evaluate_overlap(table)
                 grid["monthly_error_p90"] = float(
-                    metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"])
+                    cast(Any, metrics.loc["Calibrated MODIS", "Absolute error 90th percentile"]))
         else:
             scale = None
     if scale is not None:
@@ -258,19 +278,110 @@ def regions():
     return items
 
 
-@app.post("/api/fire/chat")
-def chat(request: ChatRequest):
-    area = resolve(request.region)
-
+def archive_reader(region, area):
     @cache
     def base_frame():
-        return calendar_table(request.region)
+        return calendar_table(region)
 
     def load_frame(include_noaa):
         frame = base_frame()
         return frame.join(noaa_monthly_counts(area), how="outer").sort_index() if include_noaa else frame
 
-    return answer(request, area, load_frame)
+    return cache(load_frame)
+
+
+@app.post("/api/fire/chat")
+def chat(request: ChatRequest | AgentChatRequest):
+    if isinstance(request, ChatRequest):
+        area = resolve(request.region)
+        return answer(request, area, archive_reader(request.region, area))
+
+    from backend.agents.service import get_agent_service
+    service = get_agent_service()
+
+    def monthly_evidence():
+        try:
+            area = resolve(request.region)
+        except HTTPException as error:
+            if error.status_code == 404:
+                return None
+            raise
+        lookup = Lookup(kind="monthly", products=[*PRODUCTS, "harmonized"])
+        return retrieve(lookup, area, archive_reader(request.region, area))
+
+    return service.process_chat(request, monthly_evidence=monthly_evidence)
+
+
+@app.get("/api/fire/chat/health")
+def chat_health():
+    from backend.agents.model_provider import FallbackModelProvider
+    from backend.agents.service import get_agent_service
+    service = get_agent_service()
+    provider = service.orchestrator.provider
+    if isinstance(provider, FallbackModelProvider):
+        primary_name = provider.primary.__class__.__name__.lower().replace("modelprovider", "")
+        fallback_name = provider.fallback.__class__.__name__.lower().replace("modelprovider", "")
+        provider_name = f"{primary_name} (fallback: {fallback_name})"
+    else:
+        provider_name = provider.__class__.__name__.lower().replace("modelprovider", "")
+    return {
+        "status": "healthy",
+        "provider": provider_name,
+        "active_sessions": service.session_store.active_session_count(),
+        "active_regions": ["sri-lanka", "demo", "101,14,102,15"],
+        "stm_max_pairs": 4,
+    }
+
+
+@app.get("/api/fire/chat/capabilities")
+def chat_capabilities():
+    return {
+        "supported_intents": [
+            "monthly_summary",
+            "trend_analysis",
+            "anomaly_explanation",
+            "sensor_comparison",
+            "calibration_explanation",
+            "hotspot_request",
+            "data_export",
+            "methodology_question",
+            "coverage_question",
+            "followup_explanation",
+            "greeting",
+            "gratitude",
+            "help",
+            "farewell",
+            "acknowledgment",
+            "unsupported_request",
+        ],
+        "deterministic_tools": [
+            "list_regions",
+            "get_monthly_activity",
+            "get_coverage_status",
+            "compare_sensors",
+            "get_seasonal_departure",
+            "get_calibration_summary",
+            "get_holdout_metrics",
+            "get_hotspot_detections",
+            "get_map_layers_action",
+            "generate_export_reference",
+        ],
+        "sensors": ["MODIS_SP", "VIIRS_SNPP_SP", "VIIRS_NOAA20_SP", "harmonized"],
+        "memory": {
+            "stm_max_pairs": 4,
+            "max_turns": 8,
+            "ttl_seconds": 7200,
+            "reference_resolution": True,
+        },
+    }
+
+
+@app.delete("/api/fire/chat/session/{session_id}")
+def clear_session(session_id: str):
+    from backend.agents.service import get_agent_service
+    service = get_agent_service()
+    deleted = service.session_store.delete(session_id)
+    return {"session_id": session_id, "deleted": deleted}
 
 
 frontend = ROOT / "frontend" / "dist"

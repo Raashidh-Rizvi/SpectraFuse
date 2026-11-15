@@ -121,6 +121,71 @@ Download additional NOAA-20 observations for the same extent:
 
 The dashboard sees newly completed NOAA-20 partitions on refresh. Re-run the command after the FIRMS quota replenishes to resume from completed days. For development, run the FastAPI server on port 8000 and run npm ci followed by npm run dev from the frontend folder.
 
+## AI assistant (multi-agent chat)
+
+The dashboard includes a conversational assistant. Open it from the **AI Assistant** button in the header or the floating pill. Ask about monthly activity, sensor comparisons, seasonal departures, calibration, coverage, hotspot maps, or CSV downloads. Follow-ups such as *"explain that"*, *"show that on the map"* and *"download that CSV"* resolve against the last four question and answer pairs of the session.
+
+Every number in an answer is computed by deterministic code against the local Parquet archive. The language model never calculates figures. Each answer carries evidence items (observed or estimated, sensor product, coverage), the calculation steps behind derived values, and the standing limitation that detection counts describe hotspots, not burned area or unique wildfire events. A month with no downloaded partitions is reported as unavailable, never as zero.
+
+```mermaid
+flowchart TD
+  U[User message] --> G{Guardrail and deterministic router}
+  G -->|greeting, thanks, help, farewell| R[Fixed reply, no data query, no LLM]
+  G -->|injection or credential probe| B[Refused]
+  G -->|follow-up| S[Session memory: last 4 pairs]
+  G -->|data question| O[Orchestrator]
+  S --> O
+  O --> A1[Data agent]
+  O --> A2[Analysis agent]
+  O --> A3[Map agent]
+  O --> A4[Explanation agent]
+  O --> A5[Export agent]
+  A1 --> T[Deterministic tools over Parquet]
+  A2 --> T
+  A3 --> T
+  A5 --> T
+  A1 --> V[Validation agent: grounding, units, secrets]
+  A2 --> V
+  A3 --> V
+  A4 --> V
+  A5 --> V
+  V --> X[Answer, evidence, calculations, UI actions, downloads]
+```
+
+### Model providers and fallback
+
+Set one provider in `.env`. Provider calls use plain HTTPS, so no vendor SDK is required on the server.
+
+| Variable | Purpose |
+| --- | --- |
+| `LLM_PROVIDER` | `groq`, `gemini` or `openai`. Leave empty to auto-detect from the keys present. |
+| `GROQ_API_KEY`, `GROQ_MODEL` | GroqCloud, default model `llama-3.3-70b-versatile`. |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Google Gemini, default model `gemini-1.5-flash`. |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | OpenAI, default model `gpt-4o-mini`. |
+| `USE_MOCK_MODEL` | `true` forces the offline provider. |
+
+Every live provider is wrapped in a fallback. A rate limit, timeout, authentication failure or network error switches the request to the offline `MockModelProvider`, so the assistant keeps answering from the local archive. With no keys at all the application runs entirely offline. Keys stay on the backend and are never returned in responses, logs or telemetry.
+
+### Chat API
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/fire/chat` | Send `message`, optional `session_id`, `region` and dashboard `context`. Returns the structured answer. |
+| `GET /api/fire/chat/health` | Active provider, fallback status and live session count. |
+| `GET /api/fire/chat/capabilities` | Supported intents, tools and memory settings. |
+| `DELETE /api/fire/chat/session/{session_id}` | Clear a session's memory. |
+
+Messages are limited to 4,000 characters. Session memory is held in process for two hours of inactivity. See [docs/PROJECT_REFERENCE.md](docs/PROJECT_REFERENCE.md) for the response schema and [docs/SpectraFuse_AI_Hosting_Guide.pdf](docs/SpectraFuse_AI_Hosting_Guide.pdf) for hosting the assistant.
+
+### Test the assistant
+
+```powershell
+python -m pytest backend/tests -q
+pyrefly check backend --min-severity=warn
+```
+
+The backend suite includes a 22-question evaluation benchmark in `backend/tests/evaluation_dataset.json`. It scores intent routing, evidence provenance, numerical grounding and refusal of prompt injection, credential probes and SQL injection. It runs offline with no paid API calls. The browser checks in `frontend/tests/chat.spec.js` cover the chat panel, the Show on Map action and script-injection safety.
+
 ## Themes, regions, and deployment
 
 Use the sun or moon button to switch themes. SpectraFuse initially follows the operating-system theme and remembers an explicit choice in the browser. The Region menu lists downloaded datasets. A geographic selection covers the extent shown by its dataset. Estimated months have MODIS provenance and an empirical error range derived from the monthly holdout.
