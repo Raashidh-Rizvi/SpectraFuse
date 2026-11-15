@@ -77,6 +77,7 @@ export function ChatProvider({ children, base = '/api/fire', currentRegion = 'sr
         intent: result.intent || 'general',
         evidence: result.evidence || [],
         calculations: result.calculations || [],
+        webSources: result.web_sources || [],
         limitations: result.limitations || [],
         ui_actions: result.ui_actions || [],
         downloads: result.downloads || [],

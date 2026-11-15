@@ -64,23 +64,41 @@
 .geo-expanded .map-controls {
   position:absolute;
   z-index:1000;
-  inset:auto 16px 22px;
-  max-height:45%;
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:.5rem .85rem;
+  top:64px;
+  right:12px;
+  width:min(19rem, calc(100% - 24px));
+  max-height:calc(100% - 148px);
+  box-sizing:border-box;
   overflow:auto;
-  padding:12px;
+  padding:10px;
   border-radius:12px;
   background:#25305bf2;
+  font-size:.8rem;
 }
-.geo-expanded .map-controls .sectionhead {gap:.65rem;}
+.geo-expanded .map-controls > .button {min-height:32px; padding:5px 8px;}
+.geo-expanded #detection-map-controls:not([hidden]) {
+  display:grid;
+  gap:.55rem;
+  margin-top:.55rem;
+}
+.geo-expanded .map-controls .sectionhead {
+  display:grid;
+  gap:.4rem;
+  margin:0;
+}
+.geo-expanded .map-heading-actions label {flex:1; min-width:0;}
+.geo-expanded .map-heading-actions select {width:100%;}
 .geo-expanded #detection-map-controls .place-search,
 .geo-expanded #detection-map-controls .map-filters,
 .geo-expanded #detection-map-controls .sensor-legend {margin:0;}
-.geo-expanded .map-controls .place-search {flex:1 1 220px;}
-.geo-expanded .map-controls .sensor-legend {flex-basis:100%;}
+.geo-expanded #detection-map-controls .map-filters {
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+}
+.geo-expanded .map-filters label:has([name=bbox]) {grid-column:1 / -1;}
+.geo-expanded #detection-map-controls input[name=bbox] {width:100%; box-sizing:border-box;}
+.geo-expanded .map-controls .sensor-legend {display:grid;}
+.geo-expanded .map-controls:has(#detection-map-controls[hidden]) {width:auto;}
 :root[data-theme=light] .geo-expanded .map-controls {background:#eff4fff5;}
 .place-search {margin:.65rem 0;}
 .place-search form {display:flex; gap:.4rem;}
@@ -97,11 +115,8 @@
 .place-search ul {list-style:none; padding:0; margin:.35rem 0;}
 .place-search li + li {margin-top:.25rem;}
 @media (max-width:600px) {
-  .geo-expanded .map-controls {inset:auto 8px 22px; max-height:45%; }
+  .geo-expanded .map-controls {right:8px; width:min(19rem, calc(100% - 64px));}
 }
-
-.geo-expanded #detection-map-controls:not([hidden]) {display:contents;}
-.geo-expanded .map-controls:has(#detection-map-controls[hidden]) {right:auto;}
 
 .dataset-chat { margin: 1rem 0; padding: 1rem; }
 .dataset-chat summary { cursor: pointer; font-weight: 700; }

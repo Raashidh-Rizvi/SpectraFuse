@@ -200,31 +200,34 @@ def calibration_factor(training):
     return None
 
 
-def monthly(area, bounds=None):
+def monthly(area, bounds=None, point_filter=None, *, include_noaa=False):
     root = workspace(area)
     records = []
-    for source in SOURCES:
+    products = PRODUCTS if include_noaa else SOURCES
+    for source in products:
         counts = {}
         for path in sorted((root / "processed" / source).glob("*.parquet")):
             month = path.stem[:7]
             days, count = counts.get(month, (0, 0))
-            if bounds is None:
+            if bounds is None and point_filter is None:
                 import pyarrow.parquet as pq
                 size = pq.ParquetFile(path).metadata.num_rows
             else:
-                west, south, east, north = bounds
                 points = pd.read_parquet(path, columns=["latitude", "longitude"])
-                size = (points.latitude.between(south, north)
-                        & points.longitude.between(west, east)).sum()
+                if bounds is not None:
+                    west, south, east, north = bounds
+                    points = points[points.latitude.between(south, north)
+                                    & points.longitude.between(west, east)]
+                size = len(point_filter(points) if point_filter is not None else points)
             counts[month] = days + 1, count + size
         for month, (days, count) in counts.items():
             year, number = map(int, month.split("-"))
             if days == calendar.monthrange(year, number)[1]:
                 records.append((month, source, count))
     if not records:
-        return pd.DataFrame(columns=[*SOURCES, "harmonized", "origin"]), {}
+        return pd.DataFrame(columns=[*products, "harmonized", "origin"]), {}
     table = pd.DataFrame(records, columns=["month", "source", "count"]).pivot(
-        index="month", columns="source", values="count").reindex(columns=list(SOURCES))
+        index="month", columns="source", values="count").reindex(columns=list(products))
     table = table.reindex(pd.period_range(table.index.min(), table.index.max(), freq="M").astype(str))
     table.index.name = "month"
     training, heldout = calibration_split(table)

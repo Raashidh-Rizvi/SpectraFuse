@@ -99,6 +99,17 @@ export default function ChatMessage({ message, onExecuteAction }) {
           {renderSafeMarkdown(message.content)}
         </div>
 
+        {message.webSources?.length > 0 && (
+          <div className="message-content">
+            <strong>Web sources</strong>
+            <ul>
+              {message.webSources.map(({url, title}) => (
+                <li key={url}><a href={url} target="_blank" rel="noopener noreferrer">{title}</a></li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Step-by-Step Calculations Accordion */}
         {calculations.length > 0 && (
           <CalculationBreakdown calculations={calculations} />

@@ -45,20 +45,22 @@ Select the existing `spectra-fuse-kbpe` project if you are updating the current 
 
 ## Ask about the dataset
 
-Set `OPENAI_API_KEY` and `OPENAI_MODEL` in the project `.env` or in the
-backend environment. Choose a model supported by your OpenAI project that
-accepts Chat Completions and has enough context for the selected archive.
-Restart FastAPI, select a region and open **Ask about the dataset**.
-The backend sends your question, recent chat turns and the region's monthly
-aggregates to OpenAI. The API key stays on the backend. Configure access
-controls at the hosting layer before enabling a paid API key on a public site.
+Set `OPENAI_API_KEY` in the project `.env` or backend environment.
+The assistant uses OpenAI's Responses API for explanations, clarification,
+and cited web search. Set `OPENAI_WEB_MODEL` if your existing
+`OPENAI_MODEL` does not support Responses API web search. With neither model
+variable set, this feature uses `gpt-4o-mini`.
 
-Try asking "Compare MODIS and VIIRS S-NPP in 2024 using months where both
-have coverage. Report matched totals and the strongest anomaly." The system
-prompt lives in `backend/chat.py`. Chat covers monthly detections, estimates,
-coverage, anomalies and calibration metrics. Raw coordinates and FRP are
-outside the chat evidence. The selected region governs chat independently
-of the chart's year and sensor filters.
+Restart FastAPI and open the dashboard's chat panel. The backend sends the
+question, recent turns and relevant archive evidence to OpenAI. Keep the
+API key on the backend and configure access controls before enabling a
+paid API key on a public site.
+
+Try asking “Compare MODIS and VIIRS S-NPP in 2024 using matched months,
+and explain the coverage.” For web search, try “Look up NASA FIRMS
+documentation and explain why a detection count differs from a fire count.”
+If the OpenAI key is missing or the request fails, the archive agent
+provides its existing answer.
 
 To ingest a period from NASA FIRMS, set `FIRMS_MAP_KEY` and run:
 

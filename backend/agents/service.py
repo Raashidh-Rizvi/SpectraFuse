@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from backend.agents.memory import SessionMemory, get_session_store
 from backend.agents.orchestrator import OrchestratorAgent
 from backend.agents.schemas import ChatRequest, ChatResponse, EvidenceItem, UIAction, DownloadItem
+from backend.agents.web_explanation import explain
 from backend.fire import data_directory
 
 logger = logging.getLogger("spectrafuse.agents")
@@ -44,7 +45,7 @@ class AgentService:
         self.orchestrator = orchestrator or OrchestratorAgent()
         self.session_store = get_session_store()
 
-    def process_chat(self, request: ChatRequest | dict[str, Any]) -> ChatResponse:
+    def process_chat(self, request: ChatRequest | dict[str, Any], *, monthly_evidence=None) -> ChatResponse:
         """Process incoming chat request with validation, session continuity, and telemetry."""
         if isinstance(request, dict):
             raw_msg = request.get("message") or request.get("question") or ""
@@ -91,6 +92,8 @@ class AgentService:
         # 4. Check for follow-up reasoning over Short-Term Memory (STM)
         follow_up_response = self._handle_follow_up(msg, session, req_id)
         if follow_up_response is not None:
+            if monthly_evidence is not None:
+                follow_up_response = explain(request, session, follow_up_response, monthly_evidence)
             session.add_turn(msg, follow_up_response)
             duration_ms = round((time.time() - start_time) * 1000, 2)
             self._log_telemetry(req_id, session.session_id, follow_up_response.intent, duration_ms, ["stm_memory_reasoner"])
@@ -101,6 +104,8 @@ class AgentService:
 
         # 6. Process via Orchestrator
         response = self.orchestrator.process(enriched_request)
+        if monthly_evidence is not None:
+            response = explain(request, session, response, monthly_evidence)
         response.request_id = req_id
         response.session_id = session.session_id
 

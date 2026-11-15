@@ -77,6 +77,7 @@ class ChatResponse(BaseModel):
     period: dict[str, str] | None = Field(default=None, description="Start and end dates or month analyzed")
     evidence: list[EvidenceItem] = Field(default_factory=list, description="Machine-readable evidence trail")
     calculations: list[CalculationStep] = Field(default_factory=list, description="Step-by-step calculations")
+    web_sources: list[dict[str, str]] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list, description="Scientific disclaimers and limitations")
     ui_actions: list[UIAction] = Field(default_factory=list, description="Client actions to execute on the dashboard")
     downloads: list[DownloadItem] = Field(default_factory=list, description="Direct download links")

@@ -126,7 +126,7 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
     return () => map.current.off('click', add);
   }, [drawing,onVertex]);
   useEffect(() => {
-    const shape = L.polygon(vertices.map(([x,y]) => [y,x]), {color:'#864dff'}).addTo(map.current);
+    const shape = L.polygon(vertices.map(([x,y]) => [y,x]), {color:'#864dff',interactive:false}).addTo(map.current);
     return () => shape.remove();
   }, [vertices]);
   return <div className="mapwrap"><div ref={element} className="map" aria-label="Map of recorded fire detections"/>
@@ -234,7 +234,7 @@ function App() {
   const [year,setYear] = useState('all'), [measure,setMeasure] = useState('harmonized');
   const [drawing,setDrawing] = useState(false);
   const [vertices,setVertices] = useState([]);
-  const [polygon,setPolygon] = useState('');
+  const polygon = vertices.length >= 3 ? vertices.map(pair=>pair.join(',')).join(';') : '';
   const polygonQuery = polygon ? '&polygon='+encodeURIComponent(polygon) : '';
   const [selected,setSelected] = useState(''), [sensor,setSensor] = useState(viirs);
   const [place, setPlace] = useState(null);
@@ -261,6 +261,27 @@ function App() {
   const defaults = {start:selected+'-01',end:selected+'-'+monthEnd,bbox:extent};
   const activeFilter = filter?.month === selected && filter.region === region ? filter : defaults;
   const [mapResult,setMap] = useState(null), [error,setError] = useState(''), [mapError,setMapError] = useState('');
+  function updateMapFilters(form) {
+    const values = new FormData(form);
+    const start = values.get('start'), end = values.get('end');
+    const bbox = values.get('bbox').trim();
+    const days = (Date.parse(end) - Date.parse(start)) / 86400000 + 1;
+    const bounds = bbox.split(',').map(value => value.trim() ? Number(value) : NaN);
+    const [w,s,e,n] = bounds;
+    const [rw,rs,re,rn] = (extent === 'world' ? '-180,-90,180,90' : extent).split(',').map(Number);
+    if (!Number.isFinite(days) || days < 1 || days > 31) {
+      setFilterError('Choose an end date on or after the start date, within 31 days.');
+      return;
+    }
+    if (bbox !== 'world' || extent !== 'world') {
+      if (bounds.length !== 4 || !(rw <= w && w < e && e <= re && rs <= s && s < n && n <= rn)) {
+        setFilterError('Enter west,south,east,north within the downloaded region.');
+        return;
+      }
+    }
+    setFilterError('');
+    setFilter({region,month:selected,start,end,bbox});
+  }
   const mapPath = '/map-layers?'+query+polygonQuery+'&'+new URLSearchParams({
     start:activeFilter.start,end:activeFilter.end,bbox:activeFilter.bbox
   });
@@ -268,7 +289,7 @@ function App() {
   const [percent,setPercent] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    setPolygon(''); setVertices([]); setDrawing(false); setFilterError(''); setError(''); setRows([]); setSelected(''); setYear('all'); setPeriod({start:'',end:''}); setPeriodError('');
+    setVertices([]); setDrawing(false); setFilterError(''); setError(''); setRows([]); setSelected(''); setYear('all'); setPeriod({start:'',end:''}); setPeriodError('');
     Promise.all([get('/dashboard?'+query,controller.signal),get('/sensor-comparison?'+query,controller.signal)])
       .then(([data,comparison]) => {
         setRows(data); setMetrics(comparison.metrics);
@@ -286,13 +307,32 @@ function App() {
       .catch(err => {if (!controller.signal.aborted) setMapError(err.message);});
     return () => controller.abort();
   }, [selected,mapPath]);
+  const calendarPath = polygon ? '/polygon-calendar?'+query+polygonQuery : '';
+  const [polygonCalendar,setPolygonCalendar] = useState(null);
+  useEffect(() => {
+    setPolygonCalendar(null);
+    if (!calendarPath) return;
+    const controller = new AbortController();
+    get(calendarPath,controller.signal)
+      .then(data => {
+        if (!controller.signal.aborted) setPolygonCalendar({path:calendarPath,data});
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) setPolygonCalendar({path:calendarPath,error:err.message});
+      });
+    return () => controller.abort();
+  }, [calendarPath]);
+  const calendarResult = polygonCalendar?.path === calendarPath ? polygonCalendar : null;
+  const calendarLoading = Boolean(calendarPath && !calendarResult);
   const [period,setPeriod] = useState({start:'',end:''});
   const [compareTrends,setCompareTrends] = useState(false);
   const [periodError,setPeriodError] = useState('');
   const years = [...new Set(rows.map(row => row.month.slice(0,4)))];
-  const visible = rows.filter(row => (year === 'all' || row.month.startsWith(year))
+  const inSelectedPeriod = row => (year === 'all' || row.month.startsWith(year))
     && (!period.start || row.month >= period.start)
-    && (!period.end || row.month <= period.end));
+    && (!period.end || row.month <= period.end);
+  const visible = rows.filter(inSelectedPeriod);
+  const calendarRows = calendarPath ? (calendarResult?.data ?? []).filter(inSelectedPeriod) : visible;
   useEffect(() => {
     if (visible.length && !visible.some(row => row.month === selected)) {
       setSelected(visible.at(-1).month);
@@ -304,7 +344,7 @@ function App() {
   const peak = active.reduce((top,row) => !top || row[measure] > top[measure] ? row : top,null);
   const noaaMonths = rows.filter(row => row[noaa] != null).length;
   const anomalyKey = measure + '_anomaly';
-  const maximum = Math.max(1,...visible.map(row => percent ? Math.abs(row[anomalyKey] ?? 0) : row[measure] ?? 0));
+  const maximum = Math.max(1,...calendarRows.map(row => percent ? Math.abs(row[anomalyKey] ?? 0) : row[measure] ?? 0));
   const chart = visible;
   const trendColors = theme === 'dark'
     ? {[modis]:'#ff9caf', [viirs]:'#ffd08a', harmonized:'#b3f5ff', [noaa]:'#f6b2e1'}
@@ -441,11 +481,14 @@ function App() {
         </Bar>
         </BarChart></ResponsiveContainer></div>{selectedRow?.estimate_low != null && <p>Estimated from MODIS · empirical error range {format(selectedRow.estimate_low)}–{format(selectedRow.estimate_high)}</p>}
         <small>Held-out monthly MAE: {format(errorMetric?.MAE)} detections</small></section>
-      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
-        <div className="calendar-scroll"><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
-          {[...new Set(visible.map(row=>row.month.slice(0,4)))].map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
+      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]}{polygon ? ' · Selected polygon' : ''} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
+        {calendarLoading && <p role="status">Updating calendar for the selected polygon…</p>}
+        {calendarResult?.error && <p role="alert">{calendarResult.error}</p>}
+        {calendarResult?.data && !calendarRows.length && <p role="status">No monthly data for the selected period.</p>}
+        <div className="calendar-scroll" aria-busy={calendarLoading}><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
+          {[...new Set(calendarRows.map(row=>row.month.slice(0,4)))].map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
             const key=value+'-'+String(index+1).padStart(2,'0');
-            const item=visible.find(row=>row.month===key);
+            const item=calendarRows.find(row=>row.month===key);
             const n=percent?item?.[anomalyKey]:item?.[measure];
             const intensity=n==null?0:Math.min(1,Math.abs(n)/maximum);
             const color=n==null?'#17204455':`hsl(0 ${n<0?35:78}% ${43-19*intensity}%)`;
@@ -477,28 +520,14 @@ function App() {
         </button>
         </div></div>
         <PlaceSearch onSelect={setPlace}/>
-        <form className="map-filters" key={region+selected+activeFilter.start+activeFilter.end+activeFilter.bbox} onSubmit={event=>{
-          event.preventDefault();
-          const values = new FormData(event.currentTarget);
-          const start = values.get('start'), end = values.get('end');
-          const bbox = values.get('bbox').trim();
-          const days = (Date.parse(end) - Date.parse(start)) / 86400000 + 1;
-          const bounds = bbox.split(',').map(value => value.trim() ? Number(value) : NaN);
-          const [w,s,e,n] = bounds;
-          const [rw,rs,re,rn] = (extent === 'world' ? '-180,-90,180,90' : extent).split(',').map(Number);
-          if (days < 1 || days > 31) {
-            setFilterError('Choose an end date on or after the start date, within 31 days.');
-            return;
-          }
-          if (bbox !== 'world' || extent !== 'world') {
-            if (bounds.length !== 4 || !(rw <= w && w < e && e <= re && rs <= s && s < n && n <= rn)) {
-              setFilterError('Enter west,south,east,north within the downloaded region.');
-              return;
-            }
-          }
-          setFilterError('');
-          setFilter({region,month:selected,start,end,bbox});
-        }} onChange={()=>setFilterError('')}>
+        <form className="map-filters" key={region+selected+locateTrigger} onSubmit={event=>event.preventDefault()}
+          onChange={event=>{
+            if (event.target.name === 'bbox') setFilterError('');
+            else updateMapFilters(event.currentTarget);
+          }}
+          onBlur={event=>{
+            if (event.target.name === 'bbox') updateMapFilters(event.currentTarget);
+          }}>
           <label>Start date (UTC)<input name="start" type="date" required defaultValue={activeFilter.start}
             onChange={event=>{
               const start = event.target.value;
@@ -509,20 +538,19 @@ function App() {
             }}/></label>
           <label>End date (UTC)<input name="end" type="date" required defaultValue={activeFilter.end}/></label>
           <label>Bounding box<input name="bbox" required defaultValue={activeFilter.bbox}
-            aria-label="Bounding box west,south,east,north"/></label>
-          <button type="submit" className="button">Apply filters</button>
+            aria-label="Bounding box west,south,east,north"
+            onKeyDown={event=>{if (event.key === 'Enter') event.currentTarget.blur();}}/></label>
         <div className="header-actions">
           <button type="button" className="button" onClick={() => {
-            if (drawing) setPolygon(vertices.map(pair=>pair.join(',')).join(';'));
-            else {setVertices([]);setPolygon('');}
+            if (!drawing) setVertices([]);
             setDrawing(!drawing);
-          }} disabled={drawing&&vertices.length<3}>{drawing?'Apply polygon':'Draw polygon'}</button>
-          {(drawing||polygon) && <button type="button" className="button" onClick={() => {
-            setDrawing(false);setVertices([]);setPolygon('');
+          }}>{drawing?'Stop drawing':'Draw polygon'}</button>
+          {(drawing||vertices.length > 0) && <button type="button" className="button" onClick={() => {
+            setDrawing(false);setVertices([]);
           }}>Clear</button>}
         </div>
         </form>
-        {drawing && <small>Click at least three points on the map, then apply.</small>}
+        {drawing && <small>Click three points to filter the map and calendar. Keep clicking to extend the area.</small>}
         <div className="sensor-legend" aria-label="Map layers">
           {comparisonLayers.map(key=>{
             const {fill,stroke} = sensorColors[key];

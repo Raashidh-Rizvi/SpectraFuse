@@ -136,6 +136,18 @@ def dashboard(region: str = "sri-lanka"):
     return records(dashboard_frame(region).reset_index())
 
 
+@app.get("/api/fire/polygon-calendar")
+def polygon_calendar(polygon: str = Query(min_length=1, max_length=4000), region: str = "sri-lanka"):
+    vertices = polygon_vertices(polygon)
+    frame, _ = monthly(resolve(region), point_filter=lambda points: filter_polygon(points, vertices),
+                       include_noaa=True)
+    if frame.empty:
+        return []
+    for name in (*PRODUCTS, "harmonized"):
+        frame[name + "_anomaly"] = historical_anomalies(frame[name])["Departure (%)"]
+    return records(frame.reset_index())
+
+
 @app.get("/api/fire/monthly-hotspots")
 def monthly_hotspots(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
                      source: str = SOURCES[1], region: str = "sri-lanka", csv: bool = False, polygon: str | None = Query(None, max_length=4000)):
@@ -154,25 +166,31 @@ def monthly_hotspots(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
             "expected_days": cal.monthrange(*map(int, month.split("-")))[1], "cells": records(cells)}
 
 
+def polygon_vertices(polygon):
+    import math
+    try:
+        vertices = [tuple(map(float, pair.split(","))) for pair in polygon.split(";")]
+        if not 3 <= len(vertices) <= 100 or not all(
+            len(pair) == 2 and math.isfinite(pair[0]) and math.isfinite(pair[1])
+            and -180 <= pair[0] <= 180 and -90 <= pair[1] <= 90 for pair in vertices
+        ):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(422, "Provide 3 to 100 longitude,latitude vertices.") from None
+    return vertices
+
+
+def filter_polygon(points, vertices):
+    x, y = points.longitude, points.latitude
+    inside = pd.Series(False, index=points.index)
+    for (x1, y1), (x2, y2) in zip(vertices, vertices[1:] + vertices[:1]):
+        if y1 != y2:
+            inside ^= ((y1 > y) != (y2 > y)) & (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)
+    return points[inside]
+
+
 def within_polygon(points, polygon):
-    if polygon:
-        import math
-        try:
-            vertices = [tuple(map(float, pair.split(","))) for pair in polygon.split(";")]
-            if not 3 <= len(vertices) <= 100 or not all(
-                len(pair) == 2 and math.isfinite(pair[0]) and math.isfinite(pair[1])
-                and -180 <= pair[0] <= 180 and -90 <= pair[1] <= 90 for pair in vertices
-            ):
-                raise ValueError
-        except ValueError:
-            raise HTTPException(422, "Provide 3 to 100 longitude,latitude vertices.") from None
-        x, y = points.longitude, points.latitude
-        inside = pd.Series(False, index=points.index)
-        for (x1, y1), (x2, y2) in zip(vertices, vertices[1:] + vertices[:1]):
-            if y1 != y2:
-                inside ^= ((y1 > y) != (y2 > y)) & (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)
-        points = points[inside]
-    return points
+    return filter_polygon(points, polygon_vertices(polygon)) if polygon else points
 
 
 @app.get("/api/fire/map-layers")
@@ -266,7 +284,14 @@ def chat(request: AgentChatRequest):
 
     from backend.agents.service import get_agent_service
     service = get_agent_service()
-    return service.process_chat(request)
+    def monthly_evidence():
+        frame = dashboard_frame(request.region)
+        if frame.empty:
+            return None
+        _, metrics = evaluate_overlap(frame)
+        return evidence(frame, metrics, request.region)
+
+    return service.process_chat(request, monthly_evidence=monthly_evidence)
 
 
 @app.get("/api/fire/chat/health")
