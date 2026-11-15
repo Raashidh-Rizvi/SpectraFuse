@@ -291,6 +291,13 @@ function App() {
   const monthEnd = selected ? new Date(Date.UTC(+selected.slice(0,4),+selected.slice(5),0)).getUTCDate() : '';
   const defaults = {start:selected+'-01',end:selected+'-'+monthEnd,bbox:extent};
   const activeFilter = filter?.month === selected && filter.region === region ? filter : defaults;
+  const [mapPresetRevision,setMapPresetRevision] = useState(0);
+  const weekSlots = Array.from({length:Math.ceil(Number(monthEnd)/7)},(_,index)=> {
+    const start = index*7+1;
+    const end = Math.min(start+6,monthEnd);
+    const date = day=>selected+'-'+String(day).padStart(2,'0');
+    return {start:date(start),end:date(end),label:start+'–'+end};
+  });
   const [mapResult,setMap] = useState(null), [error,setError] = useState(''), [mapError,setMapError] = useState('');
   function updateMapFilters(form) {
     const values = new FormData(form);
@@ -363,7 +370,10 @@ function App() {
     && (!period.start || row.month >= period.start)
     && (!period.end || row.month <= period.end);
   const visible = rows.filter(inSelectedPeriod);
+  const [calendarExpanded,setCalendarExpanded] = useState(false);
   const calendarRows = calendarPath ? (calendarResult?.data ?? []).filter(inSelectedPeriod) : visible;
+  const calendarYears = [...new Set(calendarRows.map(row=>row.month.slice(0,4)))].sort().reverse();
+  const displayedYears = calendarExpanded ? calendarYears : calendarYears.slice(0,5);
   useEffect(() => {
     if (visible.length && !visible.some(row => row.month === selected)) {
       setSelected(visible.at(-1).month);
@@ -488,6 +498,7 @@ function App() {
     {error && <p role="alert" className="panel notice">{error}</p>}
     {!error && !rows.length && <p role="status" className="panel notice">Loading NASA FIRMS observationsâ€¦</p>}
     {!!rows.length && <div className="dashboard">
+      <div className="dashboard-analytics">
       <section className="panel stat"><span><Layers size={17}/> Months with data</span><strong>{active.length}</strong><small>{visible[0]?.month} â€” {visible.at(-1)?.month}</small></section>
       <section className="panel stat"><span><Flame size={17}/> {names[measure]} detections</span><strong>{active.length ? format(total) : 'â€”'}</strong><small>Sum across selected months</small></section>
       <section className="panel stat dark"><span><Activity size={17}/> Peak activity</span><strong>{peak?.month ?? 'â€”'}</strong><small>{format(peak?.[measure])} detections</small></section>
@@ -512,24 +523,7 @@ function App() {
         </Bar>
         </BarChart></ResponsiveContainer></div>{selectedRow?.estimate_low != null && <p>Estimated from MODIS · empirical error range {format(selectedRow.estimate_low)}–{format(selectedRow.estimate_high)}</p>}
         <small>Held-out monthly MAE: {format(errorMetric?.MAE)} detections</small></section>
-      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]}{polygon ? ' · Selected polygon' : ''} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
-        {calendarLoading && <p role="status">Updating calendar for the selected polygon…</p>}
-        {calendarResult?.error && <p role="alert">{calendarResult.error}</p>}
-        {calendarResult?.data && !calendarRows.length && <p role="status">No monthly data for the selected period.</p>}
-        <div className="calendar-scroll" aria-busy={calendarLoading}><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
-          {[...new Set(calendarRows.map(row=>row.month.slice(0,4)))].map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
-            const key=value+'-'+String(index+1).padStart(2,'0');
-            const item=calendarRows.find(row=>row.month===key);
-            const n=percent?item?.[anomalyKey]:item?.[measure];
-            const intensity=n==null?0:Math.min(1,Math.abs(n)/maximum);
-            const color=n==null?'#17204455':`hsl(0 ${n<0?35:78}% ${43-19*intensity}%)`;
-            return <td key={month}><button disabled={!item} type="button" aria-pressed={selected===key} title={item?.origin ?? 'Unavailable'} aria-label={month+' '+value+': '+format(n)+(percent&&n!=null?' percent':'')}
-              style={{backgroundColor:color}}
-              onClick={()=>setSelected(key)}>{format(n)}{percent&&n!=null?'%':''}</button></td>;
-          })}</tr>)}
-        </tbody></table></div>
-        <small>{percent?'Percent departure from the median of at least two prior values for the same month. A zero median leaves the percentage blank.':'Counts of satellite detections. A dash indicates unavailable data.'}</small>
-      </section>
+      </div>
       <section className={mapExpanded ? "panel geo geo-expanded" : "panel geo"}>
         <div className="map-controls">
           {mapExpanded && <button type="button" className="button" aria-expanded={!controlsCollapsed}
@@ -551,14 +545,27 @@ function App() {
         </button>
         </div></div>
         <PlaceSearch onSelect={setPlace}/>
-        <form className="map-filters" key={region+selected+locateTrigger} onSubmit={event=>event.preventDefault()}
+        <form className="map-filters" key={region+selected+locateTrigger+":"+mapPresetRevision} onSubmit={event=>event.preventDefault()}
           onChange={event=>{
             if (event.target.name === 'bbox') setFilterError('');
-            else updateMapFilters(event.currentTarget);
+            else if (event.target.name) updateMapFilters(event.currentTarget);
           }}
           onBlur={event=>{
             if (event.target.name === 'bbox') updateMapFilters(event.currentTarget);
           }}>
+          <label>Weekly time slot (UTC)<select
+            value={weekSlots.find(slot=>slot.start===activeFilter.start && slot.end===activeFilter.end)?.start
+              ?? (activeFilter.start===defaults.start && activeFilter.end===defaults.end ? 'month' : 'custom')}
+            onChange={event=>{
+              const slot = weekSlots.find(item=>item.start===event.target.value) ?? defaults;
+              setFilter({month:selected,region,start:slot.start,end:slot.end,bbox:activeFilter.bbox});
+              setFilterError('');
+              setMapPresetRevision(value=>value+1);
+            }}>
+            <option value="month">Full month</option>
+            {weekSlots.map((slot,index)=><option key={slot.start} value={slot.start}>Week {index+1} · {slot.label}</option>)}
+            <option value="custom" disabled>Custom dates</option>
+          </select></label>
           <label>Start date (UTC)<input name="start" type="date" required defaultValue={activeFilter.start}
             onChange={event=>{
               const start = event.target.value;
@@ -613,6 +620,29 @@ function App() {
           onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
           extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}
           locateTrigger={locateTrigger}/>
+      </section>
+      <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]}{polygon ? ' · Selected polygon' : ''} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
+        {calendarLoading && <p role="status">Updating calendar for the selected polygon…</p>}
+        {calendarResult?.error && <p role="alert">{calendarResult.error}</p>}
+        {calendarResult?.data && !calendarRows.length && <p role="status">No monthly data for the selected period.</p>}
+        <div id="burning-calendar-table" className="calendar-scroll" aria-busy={calendarLoading}><table><thead><tr><th>Year</th>{months.map(month=><th key={month}>{month}</th>)}</tr></thead><tbody>
+          {displayedYears.map(value=><tr key={value}><th scope="row">{value}</th>{months.map((month,index)=>{
+            const key=value+'-'+String(index+1).padStart(2,'0');
+            const item=calendarRows.find(row=>row.month===key);
+            const n=percent?item?.[anomalyKey]:item?.[measure];
+            const intensity=n==null?0:Math.min(1,Math.abs(n)/maximum);
+            const color=n==null?'#17204455':`hsl(0 ${n<0?35:78}% ${43-19*intensity}%)`;
+            return <td key={month}><button disabled={!item} type="button" aria-pressed={selected===key} title={item?.origin ?? 'Unavailable'} aria-label={month+' '+value+': '+format(n)+(percent&&n!=null?' percent':'')}
+              style={{backgroundColor:color}}
+              onClick={()=>setSelected(key)}>{format(n)}{percent&&n!=null?'%':''}</button></td>;
+          })}</tr>)}
+        </tbody></table></div>
+        {calendarYears.length > 5 && <button type="button" className="button calendar-expand"
+          aria-expanded={calendarExpanded} aria-controls="burning-calendar-table"
+          onClick={()=>setCalendarExpanded(value=>!value)}>
+          {calendarExpanded ? 'Show latest 5 years' : 'Show all '+calendarYears.length+' years'}
+        </button>}
+        <small>{percent?'Percent departure from the median of at least two prior values for the same month. A zero median leaves the percentage blank.':'Counts of satellite detections. A dash indicates unavailable data.'}</small>
       </section>
     </div>}
     <footer>NASA FIRMS observations Â· Hotspots can include repeated detections and non-fire thermal sources.</footer>
