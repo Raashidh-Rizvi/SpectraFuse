@@ -715,3 +715,19 @@
   margin: 0;
   accent-color: #254da3;
 }
+
+header { flex-wrap: wrap; }
+header .filters { margin-inline-start: auto; }
+.header-actions { flex-wrap: wrap; }
+.intro .activity-period { justify-content: flex-end; margin: 0; min-width: 0; }
+.activity-period [role="alert"] { flex-basis: 100%; text-align: end; }
+
+@media (max-width: 900px) {
+  header .filters { order: 1; width: 100%; margin-inline-start: 0; }
+  header .filters label { flex: 1; min-width: 0; }
+}
+
+@media (max-width: 710px) {
+  .intro .activity-period { justify-content: flex-start; }
+  .activity-period [role="alert"] { text-align: start; }
+}
