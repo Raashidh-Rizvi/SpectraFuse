@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend import chat, main
+from backend.agents import service
 from backend.fire import workspace
 
 
@@ -150,7 +151,7 @@ def test_dashboard_agent_uses_archive_coverage_and_mean(monkeypatch, archive, fr
     (modis / "2000-11-17.parquet").touch()
     pd.DataFrame({"frp": [6.0, 24.0]}).to_parquet(modis / "2024-02-01.parquet")
     monkeypatch.setattr(main, "calendar_table", lambda region: frame)
-    monkeypatch.setattr("backend.agents.service.explain", lambda request, session, response, evidence: response)
+    monkeypatch.setattr(service, "explain", lambda request, session, response, evidence: response)
     cases = [
         ("What is the oldest data available in the MODIS dataset?", "2000-11-17 UTC", "2000-11-17"),
         ("What's the mean monthly fire detections for MODIS in 2024?", "10.00 detections per UTC month", 10),
