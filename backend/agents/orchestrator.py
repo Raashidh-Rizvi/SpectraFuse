@@ -207,6 +207,7 @@ class OrchestratorAgent:
         ui_actions: list[UIAction] = []
         downloads: list[DownloadItem] = []
         lookup, operation = basic_lookup(user_msg, has_history=bool(request.history))
+        calibration_question = any(w in low for w in ("multiplier", "calibration", "holdout", "factor", "how reliable"))
 
         if lookup:
             intent = {"coverage": "coverage_question", "monthly": "monthly_summary", "frp": "trend_analysis"}[lookup.kind]
@@ -301,8 +302,13 @@ class OrchestratorAgent:
             end_m = f"{target_year}-{extracted_month_num or 12:02d}"
             res = self.analysis_agent.compare_sensors_for_period(region, start_m, end_m)
 
+        # Intent: Trend / Peak Harmonized Activity
+        elif not calibration_question and any(w in low for w in ("highest", "peak", "most active", "record month", "top months", "maximum activity")):
+            intent = "trend_analysis"
+            res = self.data_agent.query_peak_months(region, top_n=5)
+
         # Intent: Calibration Multiplier / Reliability
-        elif any(w in low for w in ("multiplier", "calibration", "holdout", "factor", "how reliable", "harmoniz")):
+        elif calibration_question or "harmoniz" in low:
             intent = "calibration_explanation"
             res = self.analysis_agent.explain_calibration_factor(region)
 
@@ -310,11 +316,6 @@ class OrchestratorAgent:
         elif any(w in low for w in ("incomplete", "blank", "missing", "why is this month blank")):
             intent = "coverage_question"
             res = self.explanation_agent.explain("incomplete month", region)
-
-        # Intent: Trend / Peak Harmonized Activity
-        elif any(w in low for w in ("highest", "peak", "most active", "record month", "top months", "maximum activity")):
-            intent = "trend_analysis"
-            res = self.data_agent.query_peak_months(region, top_n=5)
 
         # Intent: Provenance / Observed vs Estimated question
         elif any(w in low for w in ("observed or estimated", "estimated or observed", "why is", "is the selected month")):
