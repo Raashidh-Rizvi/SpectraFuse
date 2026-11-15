@@ -39,17 +39,9 @@
   gap:.4rem;
   max-width:calc(100% - 118px);
 }
-.map-heading-actions label {min-width:0;}
-.map-heading-actions label span {
-  width:max-content;
-  padding:2px 5px;
-  border-radius:4px;
-  background:#25305b;
-  color:#fff;
-}
 .map-heading-actions .map-expand {flex:none;}
 #detection-map-controls .button,
-.map-heading-actions select {
+.map-heading-actions .map-expand {
   min-height:32px;
   padding:5px 8px;
 }

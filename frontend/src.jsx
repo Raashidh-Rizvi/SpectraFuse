@@ -268,7 +268,7 @@ function App() {
   const [vertices,setVertices] = useState([]);
   const polygon = vertices.length >= 3 ? vertices.map(pair=>pair.join(',')).join(';') : '';
   const polygonQuery = polygon ? '&polygon='+encodeURIComponent(polygon) : '';
-  const [selected,setSelected] = useState(''), [sensor,setSensor] = useState(viirs);
+  const [selected,setSelected] = useState('');
   const [place, setPlace] = useState(null);
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
@@ -531,10 +531,6 @@ function App() {
           extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}
           locateTrigger={locateTrigger}>
         <div className="map-heading-actions">
-        <label><span>Map product</span><select value={sensor} onChange={e=>{
-          setSensor(e.target.value);
-          setEnabled(previous=>[...new Set([...previous,e.target.value])]);
-        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label>
         <button type="button" className="button map-expand" aria-pressed={mapExpanded}
           aria-label={mapExpanded ? 'Exit fullscreen map' : 'Fullscreen map'} title={mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
           onClick={() => setMapExpanded(value => !value)}>
@@ -600,7 +596,7 @@ function App() {
           {comparisonLayers.map(key=>{
             const {fill,stroke} = sensorColors[key];
             const layer = map?.layers[key];
-            return <label key={key} data-active={sensor===key}>
+            return <label key={key} data-active={viirs===key}>
               <input type="checkbox" checked={enabled.includes(key)} onChange={event=>{
                 const checked = event.target.checked;
                 setEnabled(previous=>checked ? [...previous,key] : previous.filter(item=>item!==key));
@@ -620,7 +616,7 @@ function App() {
         {map?.layers.harmonized.status === 'Observed by VIIRS' && <small>
           Harmonized cells contain observed S-NPP counts. Partition coverage cannot establish satellite coverage.{' '}
         </small>}
-        {selected && sensor !== 'harmonized' && <small><a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download calendar-month detections</a></small>}
+        {selected && <small><a href={base+'/monthly-hotspots?month='+selected+'&source='+viirs+'&csv=true&'+query+polygonQuery}>Download calendar-month detections</a></small>}
           </div>
         </div>
       </section>
