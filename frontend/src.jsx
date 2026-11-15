@@ -5,7 +5,6 @@ import {Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveC
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
-import DatasetChat from './DatasetChat';
 import {ChatProvider, useChat} from './context/ChatContext';
 import ChatPanel from './components/chat/ChatPanel';
 
@@ -393,7 +392,6 @@ function App() {
       {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
       <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
     </section>
-    <DatasetChat key={region} base={base} region={region} label={regionInfo?.label ?? region}/>
     {!!rows.length && <form className="map-filters" key={region+period.start+period.end} onSubmit={event=>{
       event.preventDefault();
       const values = new FormData(event.currentTarget);
