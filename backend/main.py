@@ -222,15 +222,26 @@ def map_layers(start: date, end: date, region: str = "sri-lanka",
 
     layers, points_by_source = {}, {}
     columns = ["latitude", "longitude"]
+    details = ["satellite", "acquired_utc", "confidence_class", "scan", "track"]
     for source in PRODUCTS:
         root = workspace(area) / "processed" / source
         files = sorted(path for path in root.glob("*.parquet") if str(start) <= path.stem <= str(end))
-        points = pd.concat([pd.read_parquet(path, columns=columns) for path in files],
-                           ignore_index=True) if files else pd.DataFrame(columns=columns, dtype=float)
+        partitions = []
+        for path in files:
+            with pq.ParquetFile(path) as partition:
+                available = partition.schema_arrow.names
+                partitions.append(partition.read(
+                    columns=columns + [field for field in details if field in available]
+                ).to_pandas())
+        points = pd.concat(partitions, ignore_index=True) if files else pd.DataFrame(columns=columns, dtype=float)
         points = within_polygon(points[points.latitude.between(south, north)
                                       & points.longitude.between(west, east)], polygon)
         points_by_source[source] = points
         locations = points.groupby(columns).size().rename("count").reset_index()
+        if "acquired_utc" in points:
+            latest = (points.sort_values("acquired_utc", kind="stable", na_position="first")
+                      .drop_duplicates(columns, keep="last"))
+            locations = locations.merge(latest, on=columns, how="left")
         layers[source] = {"source": source, "days": len(files), "total": len(points) if files else None,
                           "status": "Complete" if len(files) == expected else "Partial" if files else "Unavailable",
                           "features": records(locations)}

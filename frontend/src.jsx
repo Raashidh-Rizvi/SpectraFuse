@@ -88,13 +88,44 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
         const style = {color:stroke, fillColor:fill, weight:1.5};
         const shape = key === 'harmonized'
           ? L.rectangle([[cell.south,cell.west],[cell.north,cell.east]], {
-              ...style, fillOpacity:Math.min(.8,.22 + Math.log1p(cell.count)/8)
+              ...style, fill:false, dashArray:'5 4'
             })
           : L.circleMarker([cell.latitude,cell.longitude], {
               ...style, fillOpacity:.8, radius:Math.min(12,3+Math.sqrt(cell.count))
             });
-        shape.bindTooltip(names[key] + ': ' + format(cell.count) +
-          (key === 'harmonized' ? ' VIIRS-scale activity · ' + layer.status : ' detections')).addTo(group);
+        if (key === 'harmonized') {
+          const countLabel = layer.factor != null ? 'estimated detections' : 'observed detections';
+          shape.bindTooltip('5 km summary · ' + format(cell.count) + ' ' + countLabel)
+            .bindPopup('5 km summary · ' + format(cell.count) + ' ' + countLabel + ' · ' + layer.status);
+        } else {
+          const hasDimensions = Number.isFinite(cell.scan) && cell.scan > 0 &&
+            Number.isFinite(cell.track) && cell.track > 0;
+          const width = hasDimensions ? cell.scan : key === modis ? 1 : .375;
+          const height = hasDimensions ? cell.track : width;
+          const position = L.latLng(cell.latitude, cell.longitude);
+          // Convert kilometre dimensions to half-spans in degrees.
+          const halfHeight = height / 222.39;
+          const halfWidth = width / (222.39 * Math.max(.01, Math.cos(cell.latitude * Math.PI / 180)));
+          const footprint = L.rectangle([
+            [Math.max(-90, cell.latitude - halfHeight), cell.longitude - halfWidth],
+            [Math.min(90, cell.latitude + halfHeight), cell.longitude + halfWidth],
+          ], {...style, fillOpacity:.12, dashArray:'4 3', interactive:false});
+          const popup = document.createElement('div');
+          popup.textContent = [
+            names[key] + ' · ' + format(cell.count) + ' detections at this location',
+            cell.acquired_utc && 'Latest observation · ' + new Date(cell.acquired_utc).toISOString(),
+            [cell.satellite, cell.confidence_class && cell.confidence_class + ' confidence'].filter(Boolean).join(' · '),
+            position.lat.toFixed(5) + ', ' + position.lng.toFixed(5) + ' · pixel center',
+            (hasDimensions ? 'Approximate footprint' : 'Nominal footprint') + ' · ' +
+              format(width * 1000) + ' × ' + format(height * 1000) + ' m · orientation schematic',
+          ].filter(Boolean).join('\n');
+          popup.style.whiteSpace = 'pre-line';
+          shape.bindTooltip(names[key] + ' · ' + format(cell.count) + ' detections')
+            .bindPopup(popup)
+            .on('popupopen', () => group.addLayer(footprint))
+            .on('popupclose', () => group.removeLayer(footprint));
+        }
+        shape.addTo(group);
       }
     }
     return () => group.remove();
@@ -253,7 +284,7 @@ function App() {
       window.removeEventListener('keydown', close);
     };
   }, [mapExpanded]);
-  const [enabled,setEnabled] = useState(primaryLayers);
+  const [enabled,setEnabled] = useState([modis, viirs]);
   const [filter,setFilter] = useState(null);
   const [filterError,setFilterError] = useState('');
   const extent = regionInfo?.area ?? defaultExtent;
@@ -417,6 +448,9 @@ function App() {
     >
       <main>
         <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
+          <div className="filters"><label><span>Region</span><select value={region} onChange={e=>setRegion(e.target.value)}>
+          {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
+          <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
           <div className="header-actions">
             <AssistantHeaderButton />
             <button className="button theme-button" type="button"
@@ -428,11 +462,7 @@ function App() {
           </div>
         </header>
     <section className="intro"><div><p className="location"><MapPin size={15}/> {regionInfo?.label ?? 'Sri Lanka'}</p><h1>Burning activity</h1><p>NASA FIRMS Â· Standard Processing Â· UTC</p></div>
-      <div className="filters"><label><span>Region</span><select value={region} onChange={e=>setRegion(e.target.value)}>
-      {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
-      <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
-    </section>
-    {!!rows.length && <form className="map-filters" key={region+period.start+period.end} onSubmit={event=>{
+    {!!rows.length && <form className="map-filters activity-period" key={region+period.start+period.end} onSubmit={event=>{
       event.preventDefault();
       const values = new FormData(event.currentTarget);
       const start = values.get('start'), end = values.get('end');
@@ -453,6 +483,7 @@ function App() {
       }}>Clear activity period</button>}
       {periodError && <small role="alert">{periodError}</small>}
     </form>}
+    </section>
     {!!rows.length && !visible.length && <p role="status">No monthly activity in the selected period.</p>}
     {error && <p role="alert" className="panel notice">{error}</p>}
     {!error && !rows.length && <p role="status" className="panel notice">Loading NASA FIRMS observationsâ€¦</p>}
@@ -561,7 +592,7 @@ function App() {
                 setEnabled(previous=>checked ? [...previous,key] : previous.filter(item=>item!==key));
               }}/>
               <i aria-hidden="true" style={{background:fill,borderColor:stroke,borderRadius:key==='harmonized'?0:'50%'}}/>
-              {names[key]}{layer && ' · '+layer.status+' · '+format(layer.total)}
+              {key === 'harmonized' ? 'Harmonized (5 km summary)' : names[key]}{layer && ' · '+layer.status+' · '+format(layer.total)}
               {layer && key!=='harmonized' && ' ('+layer.days+'/'+map.expected_days+' days)'}
             </label>;
           })}
