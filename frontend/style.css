@@ -752,6 +752,7 @@ header .filters { margin-inline-start: auto; }
 .dashboard-analytics .trend,
 .dashboard-analytics .compare,
 .dashboard > .calendar {grid-column: span 12;}
+.trend-heading {align-items: start; flex-wrap: wrap; margin-bottom: 6px;}
 .dashboard > .geo:not(.geo-expanded) {grid-column: span 6; align-self: start;}
 .calendar-expand {margin-bottom: 8px; cursor: pointer;}
 .calendar-expand + small {display: block;}

@@ -243,6 +243,12 @@ function AssistantFloatingPill() {
   );
 }
 
+function SensorBasisSelect({value,onChange}) {
+  return <label><span>Sensor basis</span><select value={value} onChange={event=>onChange(event.target.value)}>
+    {Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}
+  </select></label>;
+}
+
 function App() {
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('firescope-theme');
@@ -460,7 +466,7 @@ function App() {
       <main>
         <header><div className="brand"><img className="brand-logo" src={import.meta.env.BASE_URL + "spectrafuse-logo.png"} alt="" width="64" height="64" /><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
           <div className="filters"><label><span>Region</span><select value={region} onChange={e=>setRegion(e.target.value)}>
-          {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
+          {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><SensorBasisSelect value={measure} onChange={setMeasure}/>
           <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
           <div className="header-actions">
             <AssistantHeaderButton />
@@ -504,7 +510,10 @@ function App() {
       <section className="panel stat"><span><Flame size={17}/> {names[measure]} detections</span><strong>{active.length ? format(total) : 'â€”'}</strong><small>Sum across selected months</small></section>
       <section className="panel stat dark"><span><Activity size={17}/> Peak activity</span><strong>{peak?.month ?? 'â€”'}</strong><small>{format(peak?.[measure])} detections</small></section>
       <section className="panel stat"><span><Orbit size={17}/> NOAA-20 coverage</span><strong>{noaaMonths}<em> / {rows.length}</em></strong><small>Complete months across the pilot</small></section>
-      <section className="panel trend"><h2>Historical activity</h2><p>{compareTrends ? 'Monthly counts and VIIRS-scale activity' : names[measure]+' monthly activity'}</p>
+      <section className="panel trend"><div className="sectionhead trend-heading">
+        <div><h2>Historical activity</h2><p>{compareTrends ? 'Monthly counts and VIIRS-scale activity' : names[measure]+' monthly activity'}</p></div>
+        <SensorBasisSelect value={measure} onChange={value=>{setMeasure(value);setCompareTrends(false);}}/>
+      </div>
         <label className="toggle"><input type="checkbox" checked={compareTrends}
           onChange={event=>setCompareTrends(event.target.checked)}/> Compare sensor trends</label>
         <div className="chart"><ResponsiveContainer><AreaChart data={chart} margin={{left:1,right:13,top:10,bottom:0}}>
