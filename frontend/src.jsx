@@ -44,7 +44,7 @@ function createImageryLayer(options) {
   });
 }
 
-function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex, locateTrigger}) {
+function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex, locateTrigger, children}) {
   const element = useRef(null);
   const map = useRef(null);
   useEffect(() => {
@@ -161,6 +161,7 @@ function DetectionMap({layers, enabled, loading, extent, place, vertices, drawin
     return () => shape.remove();
   }, [vertices]);
   return <div className="mapwrap"><div ref={element} className="map" aria-label="Map of recorded fire detections"/>
+    {children}
     {loading && <span className="mapstatus">Loading detectionsâ€¦</span>}</div>;
 }
 
@@ -457,7 +458,7 @@ function App() {
       onDispatchAction={handleDispatchAction}
     >
       <main>
-        <header><div className="brand"><div className="mark"><Flame size={23}/></div><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
+        <header><div className="brand"><img className="brand-logo" src={import.meta.env.BASE_URL + "spectrafuse-logo.png"} alt="" width="64" height="64" /><div><strong>SpectraFuse</strong><small>Satellite fire activity</small></div></div>
           <div className="filters"><label><span>Region</span><select value={region} onChange={e=>setRegion(e.target.value)}>
           {(regions.length ? regions : [{id:'sri-lanka',label:'Sri Lanka'}]).map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label><span>Sensor basis</span><select value={measure} onChange={e=>setMeasure(e.target.value)}>{Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
           <label><span>Year</span><select value={year} onChange={e=>{const value=e.target.value;setYear(value);if(value!=='all')setSelected(rows.findLast(r=>r.month.startsWith(value))?.month ?? '');}}><option value="all">All years</option>{years.map(value=><option key={value}>{value}</option>)}</select></label></div>
@@ -525,6 +526,22 @@ function App() {
         <small>Held-out monthly MAE: {format(errorMetric?.MAE)} detections</small></section>
       </div>
       <section className={mapExpanded ? "panel geo geo-expanded" : "panel geo"}>
+        <DetectionMap layers={map?.layers} enabled={enabled} vertices={vertices} drawing={drawing}
+          onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
+          extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}
+          locateTrigger={locateTrigger}>
+        <div className="map-heading-actions">
+        <label><span>Map product</span><select value={sensor} onChange={e=>{
+          setSensor(e.target.value);
+          setEnabled(previous=>[...new Set([...previous,e.target.value])]);
+        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label>
+        <button type="button" className="button map-expand" aria-pressed={mapExpanded}
+          aria-label={mapExpanded ? 'Exit fullscreen map' : 'Fullscreen map'} title={mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
+          onClick={() => setMapExpanded(value => !value)}>
+          {mapExpanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}
+        </button>
+        </div>
+        </DetectionMap>
         <div className="map-controls">
           {mapExpanded && <button type="button" className="button" aria-expanded={!controlsCollapsed}
             aria-controls="detection-map-controls" onClick={() => setControlsCollapsed(value => !value)}>
@@ -533,17 +550,7 @@ function App() {
           <div id="detection-map-controls" hidden={mapExpanded && controlsCollapsed}>
           <div className="sectionhead"><div><h2>Detection map</h2>
         <p>{activeFilter.start} to {activeFilter.end} · {map?.provenance ?? 'NASA FIRMS Standard Processing'}</p></div>
-        <div className="map-heading-actions">
-        <label><span>Map product</span><select value={sensor} onChange={e=>{
-          setSensor(e.target.value);
-          setEnabled(previous=>[...new Set([...previous,e.target.value])]);
-        }}>{comparisonLayers.map(key=><option key={key} value={key}>{names[key]}</option>)}</select></label>
-        <button type="button" className="button map-expand" aria-pressed={mapExpanded}
-          aria-label="Fullscreen map" title={mapExpanded ? 'Exit fullscreen' : 'Fullscreen map'}
-          onClick={() => setMapExpanded(value => !value)}>
-          {mapExpanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}
-        </button>
-        </div></div>
+        </div>
         <PlaceSearch onSelect={setPlace}/>
         <form className="map-filters" key={region+selected+locateTrigger+":"+mapPresetRevision} onSubmit={event=>event.preventDefault()}
           onChange={event=>{
@@ -616,10 +623,6 @@ function App() {
         {selected && sensor !== 'harmonized' && <small><a href={base+'/monthly-hotspots?month='+selected+'&source='+sensor+'&csv=true&'+query+polygonQuery}>Download calendar-month detections</a></small>}
           </div>
         </div>
-        <DetectionMap layers={map?.layers} enabled={enabled} vertices={vertices} drawing={drawing}
-          onVertex={point=>setVertices(previous=>previous.length<100?[...previous,point]:previous)}
-          extent={activeFilter.bbox} place={place} loading={!!selected&&mapResult?.path!==mapPath&&!mapError}
-          locateTrigger={locateTrigger}/>
       </section>
       <section className="panel calendar"><div className="sectionhead"><div><h2><CalendarDays size={18}/> Burning calendar</h2><p>{names[measure]}{polygon ? ' · Selected polygon' : ''} · Select a month to inspect detections</p></div><label className="toggle"><input type="checkbox" checked={percent} onChange={e=>setPercent(e.target.checked)}/> Seasonal anomaly</label></div>
         {calendarLoading && <p role="status">Updating calendar for the selected polygon…</p>}
