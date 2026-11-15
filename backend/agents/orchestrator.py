@@ -2,13 +2,16 @@
 
 import re
 import uuid
+from datetime import date
 from typing import Any
 
 from backend.agents.analysis_agent import AnalysisAgent
+from backend.agents.archive_analysis import archive_analysis
 from backend.agents.data_agent import DataQueryAgent
 from backend.agents.explanation_agent import ExplanationAgent
 from backend.agents.export_agent import ExportAgent
 from backend.agents.map_agent import MapAgent
+from backend.agents.recent_detections import recent_detections
 from backend.agents.model_provider import BaseModelProvider, get_model_provider
 from backend.agents.schemas import ChatRequest, ChatResponse, DownloadItem, UIAction
 from backend.agents.validation_agent import ValidationAgent
@@ -203,8 +206,32 @@ class OrchestratorAgent:
         ui_actions: list[UIAction] = []
         downloads: list[DownloadItem] = []
 
+        # Recent observations use archive acquisition times and per-product coverage.
+        if re.search(r"\b(districts?|protected areas?|forest reserves?|reserves?)\b", low):
+            intent = "coverage_question"
+            res = {"answer": "This archive supports regional and coordinate bounds. For a district, "
+                             "reserve, or protected area, provide west,south,east,north coordinates "
+                             "and a date range to query detections within that rectangle."}
+        elif (re.search(r"\b(latest|recent|most recently|newest|currently burning)\b", low) and has_question_or_command) or (
+            re.search(r"hotspots?|detections?", low) and not re.search(r"\bmap\b", low)
+            and re.search(r"\b\d{4}-\d{2}-\d{2}\b", low)
+        ):
+            intent = "hotspot_request"
+            dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", low)
+            try:
+                start = date.fromisoformat(dates[0]) if dates else None
+                end = date.fromisoformat(dates[-1]) if dates else None
+                bounds = re.search(r"(-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?)", low)
+                bbox = tuple(map(float, bounds[1].split(","))) if bounds else None
+                if bbox and not (-180 <= bbox[0] < bbox[2] <= 180 and -90 <= bbox[1] < bbox[3] <= 90):
+                    raise ValueError("Invalid bounds")
+            except ValueError:
+                res = {"answer": "Use valid dates in YYYY-MM-DD format and bounds in west,south,east,north order."}
+            else:
+                res = recent_detections(region, low, start, end, bbox)
+
         # Intent: Map / Hotspots
-        if any(w in low for w in ("hotspot", "map", "bounding box", "bbox", "layer")):
+        elif any(w in low for w in ("map", "bounding box", "bbox", "layer")):
             intent = "hotspot_request"
             date_matches = re.findall(r"\b20\d\d-\d\d-\d\d\b", low)
             start_date = date_matches[0] if len(date_matches) >= 1 else f"{year or 2022}-03-01"
@@ -220,6 +247,28 @@ class OrchestratorAgent:
             intent = "data_export"
             res = self.export_agent.prepare_export(region, year=year or 2022)
             downloads = res.get("downloads", [])
+
+        # Keep distinct periods instead of reducing the request to its first date.
+        elif (
+            len(set(re.findall(r"\b(?:19|20)\d{2}\b", low))) > 1
+            or sum(bool(re.search(rf"\b{name}\b", low)) for name in self.MONTH_NAMES) > 1
+            or re.search(r"year.by.year|year.over.year|annual|trend|patterns?|anomalies|seasonality", low)
+            or re.search(r"observed.only|only observed|without estimates|exclude estimates", low)
+            or ("harmoniz" in low and any(w in low for w in ("before", "after", "raw")))
+            or (has_year and not has_month and not any(w in low for w in (
+                "compare", "comparison", "difference", " viirs", "modis", "calibrat",
+                "holdout", "factor", "unusual", "anomaly", "departure", "incomplete", "missing",
+            )))
+            or (("compare" in low or "difference" in low) and has_month
+                and not re.search(r"unusual|anomal|departure|normal", low)
+                and not ("modis" in low and "viirs" in low))
+            or re.search(r"\b(?:19|20)\d{2}-(?:0[1-9]|1[0-2])\b", low)
+        ):
+            intent = "monthly_summary" if has_year and not has_month and not re.search(
+                r"compare|difference|trend|annual|pattern|year.by.year|harmoniz|anomal|season|\d{4}-", low
+            ) and len(set(re.findall(r"\b(?:19|20)\d{2}\b", low))) == 1 else "trend_analysis"
+            selected_year = request.context.current_year if request.context else None
+            res = archive_analysis(region, low, selected_year, self.MONTH_NAMES)
 
         # Intent: Seasonal Anomaly / Departure
         elif any(w in low for w in ("unusual", "anomaly", "departure", "normal", "compared with earlier", "compared to earlier")):
@@ -237,12 +286,12 @@ class OrchestratorAgent:
         elif any(w in low for w in ("compare", "comparison", "modis and viirs", "viirs vs modis")):
             intent = "sensor_comparison"
             target_year = year or 2020
-            start_m = f"{target_year}-01"
-            end_m = f"{target_year}-12"
+            start_m = f"{target_year}-{extracted_month_num or 1:02d}"
+            end_m = f"{target_year}-{extracted_month_num or 12:02d}"
             res = self.analysis_agent.compare_sensors_for_period(region, start_m, end_m)
 
         # Intent: Calibration Multiplier / Reliability
-        elif any(w in low for w in ("multiplier", "calibration", "holdout", "factor", "how reliable")):
+        elif any(w in low for w in ("multiplier", "calibration", "holdout", "factor", "how reliable", "harmoniz")):
             intent = "calibration_explanation"
             res = self.analysis_agent.explain_calibration_factor(region)
 

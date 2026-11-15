@@ -2,7 +2,8 @@ import React from 'react';
 import { Sparkles } from 'lucide-react';
 
 const SUGGESTIONS = [
-  "What was the fire activity in Sri Lanka in August 2021?",
+  "Where were the latest detections in Sri Lanka?",
+  "Compare 2020 and 2021 using only observed VIIRS detections.",
   "Was March 2023 unusual compared to earlier values?",
   "Compare MODIS and VIIRS for 2020.",
   "Show hotspots on the map for 2022-03-01 to 2022-03-10.",
