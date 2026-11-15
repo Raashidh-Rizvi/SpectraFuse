@@ -34,13 +34,50 @@ const primaryLayers = [modis, viirs, 'harmonized'];
 const comparisonLayers = [...primaryLayers, noaa];
 const defaultExtent = '79.5,5.8,82,10';
 
+const osmAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+function createImageryLayer(options) {
+  return L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Imagery &copy; <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9">Esri and imagery providers</a>',
+    maxNativeZoom: 19,
+    maxZoom: 19,
+    ...options,
+  });
+}
+
 function DetectionMap({layers, enabled, loading, extent, place, vertices, drawing, onVertex, locateTrigger}) {
   const element = useRef(null);
   const map = useRef(null);
   useEffect(() => {
     const view = L.map(element.current, {scrollWheelZoom:true}).setView([7.8,80.7],7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution:'Â© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: osmAttribution,
+      maxZoom: 19,
+    }).addTo(view);
+    const dark = L.tileLayer('https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: osmAttribution + ', &copy; <a href="https://carto.com/attribution/">CARTO</a>',
+      maxZoom: 19,
+    });
+    const terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      attribution: osmAttribution + ', SRTM | &copy; <a href="https://opentopomap.org/about">OpenTopoMap (CC BY-SA)</a>',
+      maxNativeZoom: 17,
+      maxZoom: 19,
+    });
+    const satellite = createImageryLayer();
+    const terrainSatellite = L.layerGroup([
+      L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Hillshade &copy; Esri, Airbus DS, USGS, NGA, NASA, CGIAR, GEBCO and N Robinson',
+        maxNativeZoom: 16,
+        maxZoom: 19,
+      }),
+      createImageryLayer({opacity: .78}),
+    ]);
+    L.control.layers({
+      'Street (OpenStreetMap)': street,
+      'Dark': dark,
+      'Terrain': terrain,
+      'Satellite': satellite,
+      'Terrain + Satellite': terrainSatellite,
     }).addTo(view);
     map.current = view;
     const observer = new ResizeObserver(() => view.invalidateSize());
