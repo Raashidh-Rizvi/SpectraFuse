@@ -3,10 +3,11 @@
 import re
 
 import pandas as pd
+from fastapi import HTTPException
 
 from backend.analytics import historical_anomalies
 from backend.agents.schemas import EvidenceItem
-from backend.chat import basic_answer
+from backend.chat import basic_answer, plan_answer
 from backend.chat_data import retrieve
 
 
@@ -23,6 +24,8 @@ def archive_statistic(region, lookup, operation):
     elif operation == "mean_frp":
         metric, value, units = "mean_detection_frp_mw", result["mean"], "downloaded UTC days"
         citation = {**citation, "detections_with_frp": result["detections_with_frp"]}
+    elif operation == "range":
+        metric, value, units = "downloaded_date_range", {"first": first, "last": last} if first else None, "downloaded UTC days"
     else:
         metric = "latest_downloaded_day" if operation in ("latest", "newest", "most recent", "last") else "earliest_downloaded_day"
         value = last if metric == "latest_downloaded_day" else first
@@ -33,11 +36,43 @@ def archive_statistic(region, lookup, operation):
     coverage_text = f"{coverage} from {first} through {last}" if first and first != last else coverage
     return {
         "answer": f"{basic_answer(operation, result)}\n\n{source} · {coverage_text}.",
-        "period": {"start": first, "end": last} if first and last else None,
+        "period": {"start": first, "end": last} if first and last and lookup.kind != "coverage" else None,
         "evidence": [EvidenceItem(source=source, product=citation["product"], metric=metric, value=value,
                                   status="unavailable" if value is None else "complete" if available == expected else "partial",
                                   coverage=coverage, metadata=citation)],
     }
+
+
+def plan_archive_response(request, session, response):
+    """Resolve an unmatched archive question against the same typed lookups as the dataset API."""
+    from backend.main import archive_reader, resolve
+
+    history = [message.model_dump() for message in request.history if message.role in ("user", "assistant")][-6:]
+    if not history:
+        history = [message for turn in session.turns[-3:] if turn.region == response.region
+                   for message in ({"role": "user", "content": turn.user_message},
+                                   {"role": "assistant", "content": turn.agent_answer})]
+    context = {"question": request.message, "region": response.region, "history": history,
+               "dashboard_filters": request.context.model_dump() if request.context else None}
+    try:
+        area = resolve(response.region)
+        source = "Synthetic demo" if area == "demo" else "NASA FIRMS Standard Processing"
+        content, results = plan_answer(context, source, area, archive_reader(response.region, area))
+    except HTTPException:
+        return response
+
+    evidence = []
+    for result in results:
+        citation = result["citation"]
+        values = {key: value for key, value in result.items() if key != "citation"}
+        available, expected = citation["available"], citation["expected"]
+        evidence.append(EvidenceItem(source=source, product=citation["product"], metric=citation["basis"],
+                                     value=values or [citation["first"], citation["last"]],
+                                     status="unavailable" if not available else "complete" if available == expected else "partial",
+                                     coverage=f"{available} of {expected}" if expected is not None else str(available),
+                                     metadata=citation))
+    return response.model_copy(update={"answer": content, "evidence": evidence,
+                                       "intent": "archive_analysis" if evidence else response.intent})
 
 
 def archive_analysis(region, question, selected_year, month_names):

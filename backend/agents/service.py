@@ -8,10 +8,12 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from backend.agents.archive_analysis import plan_archive_response
 from backend.agents.memory import SessionMemory, get_session_store
 from backend.agents.orchestrator import OrchestratorAgent
 from backend.agents.schemas import ChatRequest, ChatResponse, EvidenceItem, UIAction, DownloadItem
 from backend.agents.web_explanation import explain
+from backend.fire import PRODUCTS
 from backend.fire import data_directory
 
 logger = logging.getLogger("spectrafuse.agents")
@@ -104,8 +106,11 @@ class AgentService:
 
         # 6. Process via Orchestrator
         response = self.orchestrator.process(enriched_request)
-        if monthly_evidence is not None:
-            response = explain(request, session, response, monthly_evidence)
+        if monthly_evidence is not None and not any("basis" in item.metadata for item in response.evidence):
+            if response.intent == "clarification" and not re.search(r"\b(?:search the web|look up|external sources)\b", msg, re.I):
+                response = plan_archive_response(request, session, response)
+            else:
+                response = explain(request, session, response, monthly_evidence)
         response.request_id = req_id
         response.session_id = session.session_id
 
@@ -302,6 +307,13 @@ class AgentService:
     def _enrich_request_from_memory(self, request: ChatRequest, session: SessionMemory) -> ChatRequest:
         """Enrich user request with memory defaults if region or timeframe were omitted."""
         low = request.message.lower()
+        edge = re.fullmatch(r"(?:(?:and|what about)\s+)(?:the )?(earliest|oldest|latest|newest)(?: data)?[?.!]?", low.strip())
+        if edge:
+            previous = session.get_last_substantive_turn()
+            if previous and previous.region == request.region and len(previous.evidence) == 1:
+                item = previous.evidence[0]
+                if item.metadata.get("basis") == "daily_partitions" and item.product in PRODUCTS:
+                    return request.model_copy(update={"message": f"{edge[1]} downloaded data for {item.product}"})
 
         # If user refers to 'next month' or a specific month name without a year, use session year
         year_match = re.search(r"\b(19\d\d|20\d\d)\b", low)

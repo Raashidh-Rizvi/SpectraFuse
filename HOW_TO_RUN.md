@@ -56,6 +56,7 @@ The answer shows the product, retrieved dates and coverage. Coverage dates come
 from downloaded UTC partitions, including days with zero detections. Monthly
 averages include complete months with zero detections and omit missing months.
 Comparisons use months shared by the requested sensors.
+After a coverage answer, ask "And the latest?" to check the same sensor.
 
 Set `OPENAI_API_KEY` in the project `.env` or backend environment.
 The assistant uses OpenAI's Responses API for explanations, clarification,
@@ -73,6 +74,8 @@ and explain the coverage.” For web search, try “Look up NASA FIRMS
 documentation and explain why a detection count differs from a fire count.”
 If the OpenAI key is missing or the request fails, the archive agent
 provides its existing answer.
+Set `OPENAI_MODEL` to enable model-assisted archive lookups in the dashboard
+for questions that need more flexible interpretation.
 
 The original dataset chat API also accepts a `question` request at
 `POST /api/fire/chat`. For broader questions in this format, set `OPENAI_MODEL`

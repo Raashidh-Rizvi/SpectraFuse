@@ -151,10 +151,15 @@ def test_dashboard_agent_uses_archive_coverage_and_mean(monkeypatch, archive, fr
     (modis / "2000-11-17.parquet").touch()
     pd.DataFrame({"frp": [6.0, 24.0]}).to_parquet(modis / "2024-02-01.parquet")
     monkeypatch.setattr(main, "calendar_table", lambda region: frame)
-    monkeypatch.setattr(service, "explain", lambda request, session, response, evidence: response)
+    explanation = Mock(side_effect=AssertionError("archive answers must keep their verified evidence"))
+    monkeypatch.setattr(service, "explain", explanation)
     cases = [
-        ("What is the oldest data available in the MODIS dataset?", "2000-11-17 UTC", "2000-11-17"),
-        ("What's the mean monthly fire detections for MODIS in 2024?", "10.00 detections per UTC month", 10),
+        ("what is the oldest data available on the modis dataset", "2000-11-17 UTC", "2000-11-17"),
+        ("And the latest?", "2024-02-01 UTC", "2024-02-01"),
+        ("How far back does MODIS go?", "2000-11-17 UTC", "2000-11-17"),
+        ("What dates does the MODIS archive cover?", "2000-11-17 through 2024-02-01 UTC",
+         {"first": "2000-11-17", "last": "2024-02-01"}),
+        ("How many MODIS detections per month on average in 2024?", "10.00 detections per UTC month", 10),
         ("What was the mean MODIS FRP in February 2024?", "15.00 MW per detection", 15),
     ]
 
@@ -167,3 +172,40 @@ def test_dashboard_agent_uses_archive_coverage_and_mean(monkeypatch, archive, fr
         legacy = client.post("/api/fire/chat", json={"question": cases[0][0]})
         assert legacy.status_code == 200
         assert legacy.json()["citations"][0]["first"] == "2000-11-17"
+    explanation.assert_not_called()
+
+
+@pytest.mark.parametrize("question", ["What's the mean value?", "What is available here?", "Where is Mount Everest?"])
+def test_dashboard_unresolved_question_does_not_guess_a_month(monkeypatch, archive, question):
+    monkeypatch.setattr(chat, "load_dotenv", Mock())
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(main, "calendar_table", Mock(side_effect=AssertionError("no monthly lookup was requested")))
+
+    with TestClient(main.app) as client:
+        response = client.post("/api/fire/chat", json={"message": question})
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "clarification"
+    assert response.json()["evidence"] == []
+    assert response.json()["limitations"] == []
+    assert "August 2021" not in response.json()["answer"]
+
+
+@pytest.mark.parametrize(("question", "statistic", "end_month", "coverage"), [
+    ("Find the median of MODIS monthly detections from January to April 2024.", "median", "2024-04", "3 of 4"),
+    ("What were the average monthly MODIS detections in the first half of 2024?", "mean", "2024-06", "3 of 6"),
+])
+def test_dashboard_model_fallback_retrieves_requested_statistic(monkeypatch, archive, frame, question, statistic, end_month, coverage):
+    monkeypatch.setattr(main, "calendar_table", lambda region: frame)
+    plan = {"lookups": [{"kind": "monthly", "products": ["MODIS_SP"],
+                         "start_month": "2024-01", "end_month": end_month}]}
+    provider = provider_mock(monkeypatch, json.dumps(plan), f"The {statistic} was 10 MODIS detections per month.")
+
+    with TestClient(main.app) as client:
+        response = client.post("/api/fire/chat", json={"message": question})
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "archive_analysis"
+    assert response.json()["evidence"][0]["value"][statistic] == 10
+    assert response.json()["evidence"][0]["coverage"] == coverage
+    assert provider.call_count == 2

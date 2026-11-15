@@ -357,6 +357,8 @@ def chat_capabilities():
             "data_export",
             "methodology_question",
             "coverage_question",
+            "archive_analysis",
+            "clarification",
             "followup_explanation",
             "greeting",
             "gratitude",

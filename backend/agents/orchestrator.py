@@ -15,7 +15,7 @@ from backend.agents.recent_detections import recent_detections
 from backend.agents.model_provider import BaseModelProvider, get_model_provider
 from backend.agents.schemas import ChatRequest, ChatResponse, DownloadItem, UIAction
 from backend.agents.validation_agent import ValidationAgent
-from backend.chat import basic_lookup
+from backend.chat import basic_lookup, coverage_order
 
 
 class OrchestratorAgent:
@@ -208,16 +208,18 @@ class OrchestratorAgent:
         downloads: list[DownloadItem] = []
         lookup, operation = basic_lookup(user_msg, has_history=bool(request.history))
         calibration_question = any(w in low for w in ("multiplier", "calibration", "holdout", "factor", "how reliable"))
+        monthly_topic = re.search(r"\b(?:fire activity|fire counts?|detections?|hotspots?|burning activity)\b", low)
 
         if lookup:
             intent = {"coverage": "coverage_question", "monthly": "monthly_summary", "frp": "trend_analysis"}[lookup.kind]
             res = archive_statistic(region, lookup, operation)
-        elif re.search(r"\b(?:mean|average)\b", low) and re.search(r"\b(?:frp|fire radiative power)\b", low):
-            intent = "coverage_question"
-            res = {"answer": "Specify a sensor and month for a mean fire radiative power lookup, such as ‘mean MODIS FRP in February 2024’."}
-        elif re.fullmatch(r"what(?: is|'?s) the (?:mean|average)(?: value)?[?.!]?", low):
-            intent = "coverage_question"
-            res = {"answer": "Which sensor and metric should I average? Specify the period if you have one in mind."}
+        elif coverage_order(low):
+            intent = "clarification"
+            res = {"answer": "Which sensor and archive period do you want to check? For example, ask how far back MODIS data goes."}
+        elif not calibration_question and (re.search(r"\b(?:average|mean|median)\s+[a-z]", low)
+                                          or re.search(r"\bwhat(?: is|'?s) the (?:mean|average)\b", low)):
+            intent = "clarification"
+            res = {"answer": "Which sensor and metric should I calculate? For example, ask for average monthly MODIS detections in 2024 or mean MODIS FRP in February 2024."}
         elif re.search(r"\b(districts?|protected areas?|forest reserves?|reserves?)\b", low):
             intent = "coverage_question"
             res = {"answer": "This archive supports regional and coordinate bounds. For a district, "
@@ -267,7 +269,7 @@ class OrchestratorAgent:
             or re.search(r"year.by.year|year.over.year|annual|trend|patterns?|anomalies|seasonality", low)
             or re.search(r"observed.only|only observed|without estimates|exclude estimates", low)
             or ("harmoniz" in low and any(w in low for w in ("before", "after", "raw")))
-            or (has_year and not has_month and not any(w in low for w in (
+            or (monthly_topic and has_year and not has_month and not any(w in low for w in (
                 "compare", "comparison", "difference", " viirs", "modis", "calibrat",
                 "holdout", "factor", "unusual", "anomaly", "departure", "incomplete", "missing",
             )))
@@ -318,20 +320,19 @@ class OrchestratorAgent:
             res = self.explanation_agent.explain("incomplete month", region)
 
         # Intent: Provenance / Observed vs Estimated question
-        elif any(w in low for w in ("observed or estimated", "estimated or observed", "why is", "is the selected month")):
+        elif year and extracted_month_num and any(w in low for w in ("observed or estimated", "estimated or observed", "why is", "is the selected month")):
             intent = "coverage_question"
-            target_year = year or 2021
-            target_month_num = extracted_month_num or 8
-            target_month_str = f"{target_year:04d}-{target_month_num:02d}"
-            res = self.data_agent.query_monthly_summary(region, target_month_str)
+            res = self.data_agent.query_monthly_summary(region, f"{year:04d}-{extracted_month_num:02d}")
 
-        # Default Intent: Monthly Summary
-        else:
+        elif year and extracted_month_num and (monthly_topic or low.startswith("what about")):
             intent = "monthly_summary"
-            target_year = year or 2021
-            target_month_num = extracted_month_num or 8
-            target_month_str = f"{target_year:04d}-{target_month_num:02d}"
-            res = self.data_agent.query_monthly_summary(region, target_month_str)
+            res = self.data_agent.query_monthly_summary(region, f"{year:04d}-{extracted_month_num:02d}")
+        else:
+            intent = "clarification"
+            res = {"answer": "What would you like to look up in the fire archive? Specify the sensor, metric, or period you’re interested in."}
+
+        if intent == "clarification":
+            return ChatResponse(request_id=req_id, session_id=sess_id, intent=intent, answer=res["answer"], region=region)
 
         # 4. Run Guardrail Validation Pass
         raw_answer = res.get("answer", "")
